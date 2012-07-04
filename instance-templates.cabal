@@ -1,0 +1,31 @@
+Name:                instance-templates
+Version:             0.0.1
+Synopsis:            TH prototype of instance-templates Haskell extension
+Description:
+License:             BSD3
+License-file:        LICENSE
+Author:              Michael Sloan
+Maintainer:          Michael Sloan <mgsloan at gmail>
+Homepage:            http://github.com/mgsloan/instance-templates
+Copyright:           Michael Sloan 2012
+Category:            Template Haskell
+Build-type:          Simple
+Stability:           experimental
+Cabal-version:       >=1.6
+Bug-Reports:         http://github.com/mgsloan/instance-templates
+Source-Repository head
+  Type: git
+  Location: git://github.com/mgsloan/instance-templates
+
+Library
+  Hs-Source-Dirs:    src
+
+  Exposed-modules:   Language.Haskell.InstanceTemplates
+  Build-depends:     base >= 3.0 && < 6,
+                     directory,
+                     filepath,
+                     haskell-src-meta,
+                     haskell-src-exts,
+                     random,
+                     template-haskell,
+                     th-lift
