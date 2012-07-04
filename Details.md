@@ -1,3 +1,13 @@
+Interaction with -XDefaultSignatures
+====================================
+
+Interaction with -XGenericDeriving
+==================================
+
+TODO: fill out these sections. Rest assured, these are very positive
+interactions!
+
+
 Scope-Restricted Weak Typing
 ============================
 
@@ -38,6 +48,12 @@ templates.  For example, it could be specified that a result of type `f a`
 should have `fmap g` applied to it.  By giving a notation for specifying this
 rewriting, we are conceptually introducing the convenience of weak-typing, but
 properly scoped to a known set of definitions / value junctures.
+
+
+Relationship to -XGeneralizedNewtypeDeriving
+============================================
+
+
 
 
 Relationship to Other Proposals
