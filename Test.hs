@@ -1,4 +1,4 @@
-{-# LANGUAGE TemplateHaskell, QuasiQuotes, ConstraintKinds, FlexibleInstancesk #-}
+{-# LANGUAGE TemplateHaskell, QuasiQuotes, ConstraintKinds, FlexibleInstances #-}
 module Test where
 
 import Language.Haskell.InstanceTemplates

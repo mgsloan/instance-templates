@@ -1,7 +1,7 @@
 {-# LANGUAGE TemplateHaskell, QuasiQuotes, ViewPatterns, ConstraintKinds, KindSignatures, TupleSections #-}
 module Language.Haskell.InstanceTemplates 
   ( derive, deriving', Instance(..)
-  , Typeable(..)
+  , Typeable(..), parseType
   ) where
 
 import Control.Arrow        ( first, second, (***) )
@@ -25,21 +25,30 @@ import Language.Haskell.TH.Lift        (lift)
 import qualified Language.Haskell.Exts as Exts
 import qualified Language.Haskell.Meta as Exts
 
-deriving' = dquasi (mkDeriver . parseDeriver)
+-- The public API.
+
+deriving' = QuasiQuoter undefined undefined undefined
+                        (buildDeriver . parseDeriver)
+
 
 class Deriver a where
   derive :: a -> [Dec] -> [Dec]
 
 data Instance (ctxt :: Constraint) = Instance
 
+parseType :: String -> Type
+parseType = Exts.toType
+          . fromLeft
+          . Exts.parseResultToEither
+          . Exts.parseTypeWithMode parseMode
+
+
+-- The result of parsing.
 
 data DeriverRep = DeriverRep Dec [Dec]
 
-instance Show DeriverRep where
-  show (DeriverRep inp _) = pprint inp
-
-mkDeriver :: DeriverRep -> DecsQ
-mkDeriver (DeriverRep (ClassD inpCtx inpName inpTvs inpFds inpDecs) insts)
+buildDeriver :: DeriverRep -> DecsQ
+buildDeriver (DeriverRep (ClassD inpCtx inpName inpTvs inpFds inpDecs) insts)
   | not (null inpFds) = error "Functional dependencies not allowed in instance templates."
 --TODO: It /might/ be nice to be able to have instance derivers that generate no instances...
   | null insts = error "Instance deriver must generate some instances."
@@ -78,7 +87,7 @@ mkDeriver (DeriverRep (ClassD inpCtx inpName inpTvs inpFds inpDecs) insts)
   mkInst (InstanceD ctx typ decs)
     = InstanceD (inpCtx ++ ctx) typ decs
 
--- A few utils
+-- Utils for buildDeriver
 
 mkTupleT :: [Type] -> Type
 mkTupleT xs = foldl AppT (TupleT (length xs)) xs
@@ -95,49 +104,8 @@ kindArity :: Kind -> Int
 kindArity StarK = 1
 kindArity (ArrowK _ r) = 1 + kindArity r
 
-parseType :: String -> Type
-parseType = Exts.toType
-          . fromLeft
-          . Exts.parseResultToEither
-          . Exts.parseTypeWithMode parseMode
 
-parseDecs :: String -> [Dec]
-parseDecs = (\(Exts.Module _ _ _ _ _ _ x) -> Exts.toDecs x)
-          . fromLeft
-          . Exts.parseResultToEither
-          . Exts.parseModuleWithMode parseMode
-          . ("module Dummy where\n" ++)
-
--- | Parse mode with all extensions and no fixities.
-parseMode :: Exts.ParseMode
-parseMode = Exts.ParseMode
-  { Exts.parseFilename = ""
-  , Exts.extensions = Exts.glasgowExts ++ [Exts.TupleSections, Exts.BangPatterns, Exts.ViewPatterns]
-  , Exts.ignoreLinePragmas = False
-  , Exts.ignoreLanguagePragmas = False
-  , Exts.fixities = Nothing
-  }
-
-fromLeft :: Either String a -> a
-fromLeft = either error id
-
-dquasi :: (String -> DecsQ) -> QuasiQuoter
-dquasi f = QuasiQuoter undefined undefined undefined f
-
-splitFind :: String -> String -> Maybe (String, String)
-splitFind on xs =   second (drop $ length on)
-                <$> (find (isPrefixOf on . snd) $ zip (inits xs) (tails xs))
-
--- NOTE: assumes that the string is already known to be whitespace.
-indentLevel :: String -> Int
-indentLevel = length . concatMap subst . takeWhile (`elem` " \t")
- where
-  subst '\t' = replicate 8 ' '
-  subst x = [x]
-
--- ekmett's bizip specialized to tuples
-bizip :: (a1 -> a2 -> a3) -> (b1 -> b2 -> b3) -> (a1, b1) -> (a2, b2) -> (a3, b3)
-bizip f g (x, y) (x', y') = (f x x', g y y')
+-- The parser for deriver' quasi-quotes.
 
 parseDeriver :: String -> DeriverRep
 parseDeriver input
@@ -170,3 +138,40 @@ parseDeriver input
          . tail
          $ lines (' ':rest)
   helper str = (str, "")
+
+-- Utils for the deriverParser
+
+parseDecs :: String -> [Dec]
+parseDecs = (\(Exts.Module _ _ _ _ _ _ x) -> Exts.toDecs x)
+          . fromLeft
+          . Exts.parseResultToEither
+          . Exts.parseModuleWithMode parseMode
+          . ("module Dummy where\n" ++)
+
+-- | Parse mode with all extensions and no fixities.
+parseMode :: Exts.ParseMode
+parseMode = Exts.ParseMode
+  { Exts.parseFilename = ""
+  , Exts.extensions = Exts.glasgowExts ++ [Exts.TupleSections, Exts.BangPatterns, Exts.ViewPatterns]
+  , Exts.ignoreLinePragmas = False
+  , Exts.ignoreLanguagePragmas = False
+  , Exts.fixities = Nothing
+  }
+
+fromLeft :: Either String a -> a
+fromLeft = either error id
+
+splitFind :: String -> String -> Maybe (String, String)
+splitFind on xs =   second (drop $ length on)
+                <$> (find (isPrefixOf on . snd) $ zip (inits xs) (tails xs))
+
+-- NOTE: assumes that the string is already known to be whitespace.
+indentLevel :: String -> Int
+indentLevel = length . concatMap subst . takeWhile (`elem` " \t")
+ where
+  subst '\t' = replicate 8 ' '
+  subst x = [x]
+
+-- ekmett's bizip specialized to tuples
+bizip :: (a1 -> a2 -> a3) -> (b1 -> b2 -> b3) -> (a1, b1) -> (a2, b2) -> (a3, b3)
+bizip f g (x, y) (x', y') = (f x x', g y y')
