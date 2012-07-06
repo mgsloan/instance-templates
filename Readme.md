@@ -64,6 +64,19 @@ above definition to implicitly create the following constraint-kind synonym:
 type PreOrder a = (Eq a, Ord a)
 ```
 
+On the topic of these more recent type-system enhancements, while I have not
+yet implemented it in the TH prototype, it seems like having type and data
+family declarations will be relatively straightforward.  This is true of both
+the head of the `deriving class` (which resemble class syntax), and the
+generated instances (which use instance syntax).
+
+This is because the parameters are directly substituted into the generated
+instance.  So, a type family instance declaration will be substituted into all
+usages of that type family in the generated instances.  It seems like data
+family declarations could be more problematic because it seems like their
+usage should usually be linear, as it makes less sense to define a data-type
+multiple times (the names of the constructors would conflict).
+
 Resolving Overlap
 -----------------
 
@@ -250,7 +263,7 @@ There's a bit more to say about this idea!
   https://github.com/mgsloan/instance-templates/blob/master/Deltas.md
 
 * Some more ideas and notes:
-  https://github.com/mgsloan/instance-templates/blob/master/Details.md
+  https://github.com/mgsloan/instance-templates/blob/master/Extras.md
 
 
 Credits
