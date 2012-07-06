@@ -103,6 +103,8 @@ before, which leads to some design decisions:
   re-working entire hierarchies.  The rest of this section is devoted to this
   issue.
 
+
+
 For example, we could write an instance template for the old version of
 `Applicative`, that generated the new, properly hierarchical versions of
 `Functor` and `Applicative`.  We could then also write an instance template
@@ -127,6 +129,7 @@ deriving class Bar a where
   bar :: a -> a
   baz :: a
 
+  -- Note: This references the above instance template.
   instance Foo a where
     foo = bar baz
 
@@ -250,13 +253,31 @@ comparatively minimal issues:
   disastrous, though - as this could be restricted to usage of constraint
   kinds, and not actual declaration of them / usage of "Constraint".
 
+* One bit of ugliness is that now we can't move an instance declaration that
+  is overlapped by an instance template into another file, without having a
+  declaration of the form `hiding instance ...` that suppresses the generated
+  instance.
+
+    - One alternative is to have instance templates be a part of the exported
+      signature, and then later do whole-program instantiation of these
+      templates.  This is the same sort of resolution that would need to take
+      place for superclass instance defaults to work out while preserving this
+      mobility-of-instances property.
+
+
+    - The difference in behavior found when moving an instance out of a module
+      can actually be beneficial - we can use an instance template which
+      overlaps with those defined in the module, even if its definition
+      doesn't know about them!  All of the generated instances that overlap
+      with the ones that already exist will be suppressed.
+
 
 More Stuff
 ==========
 
 There's a bit more to say about this idea!
 
-* A few examples of how this is useful:
+* A few examples of how it's useful:
   https://github.com/mgsloan/instance-templates/blob/master/Examples.md
 
 * We gain additional ability to represent API differences:
