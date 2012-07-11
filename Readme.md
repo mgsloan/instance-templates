@@ -194,6 +194,7 @@ Why?
   - People have observed many things that are wrong with TH / mis-aligned with
     Haskell philosophy.  I find it to be an extremely useful and invaluable tool
     despite, but many of these points are valid.
+
     http://stackoverflow.com/questions/10857030/whats-so-bad-about-template-haskell/
 
 
@@ -226,8 +227,7 @@ comparatively minimal issues:
   precedent for language extensions doing this?
 
   [Niklas Broberg's take on this, in the context of superclass default instances]
-  http://www.mail-archive.com/glasgow-haskell-users@haskell.org/msg20351.html">
-  </a>
+  (http://www.mail-archive.com/glasgow-haskell-users@haskell.org/msg20351.html")
 
   If ConstraintKinds is used as the mechanism that allows for naming the set
   of derived instances, then this would also mean that -XConstraintKinds would
