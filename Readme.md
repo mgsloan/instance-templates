@@ -1,10 +1,34 @@
 Instance Templates
 ==================
 
-The purpose of these declarations is to provide a mechanism for expressing how
-a set of interfaces can be expressed in terms of some other interface.  This
-allows us to restructure class hierarchies without breaking client code, and
-reduce the code duplication of boilerplate instances.
+Hardly any discussion of type class hierarchy goes without the common gripe
+that Applicative ought to be the superclass of Monad.  However, restructuring
+this hierarchy would break a great deal of code, particularly if we removed
+redundant methods such as "pure".
+
+This Haskell extension proposal provides a simple solution for refactoring
+type-class hierarchies while maintaining backwards compatibility.  However, it
+can also do more than this, allowing boilerplate declarations to be generated
+in terms of some common pattern of usage.  Functions in Haskell enjoy the
+reasoning and abstraction benefits of referential transparency.  This
+extension gives us this same power, but for instance declarations, allowing
+for the abstraction of common instantiation patterns.
+
+This repository contains some other documentation about this extension, as well
+as a work-in-progress TH prototype of the feature.  The file "Rewriter.hs" uses
+the haskell-src-exts package to rewrite Haskell code to allow regular classes
+and instances to use this framework.
+
+This proposal shares some goals with [Default Superclass Instances](
+http://hackage.haskell.org/trac/ghc/wiki/DefaultSuperclassInstances),
+but achieves these goals in a fashion that's easier to understand and 
+implement, of course making a different set of trade-offs.  We sacrifice
+the ability to restructure hierarchies without touching the actual code,
+in exchange for being capable of much more.
+
+
+Description
+-----------
 
 ```haskell
 deriving class PreOrder a where
@@ -77,6 +101,7 @@ family declarations could be more problematic because it seems like their
 usage should usually be linear, as it makes less sense to define a data-type
 multiple times (the names of the constructors would conflict).
 
+
 Resolving Overlap
 -----------------
 
@@ -93,7 +118,7 @@ before, which leads to some design decisions:
   `Monad` - be it a normal or compound class constraint.
 
   However, this is an issue when it comes to orphan instances, as identical
-  library / client code could have an instance clash, given a different set of
+  library + client code could have an instance clash, given a different set of
   definitions for the library's dependencies.  I think that this is acceptable,
   as orphan instances are known to be dangerous, and many instance templates
   would not have this sort of behavior.
@@ -102,8 +127,6 @@ before, which leads to some design decisions:
   invocations.  This is something that we'd quite reasonably want to do, while
   re-working entire hierarchies.  The rest of this section is devoted to this
   issue.
-
-
 
 For example, we could write an instance template for the old version of
 `Applicative`, that generated the new, properly hierarchical versions of
@@ -177,6 +200,17 @@ instance Enumerable Int where
   enumerate = 0 : map (+1) enumerate
 ```
 
+One thing to note is that this should be done transitively.  In other words,
+if we have one instance template invoke another, and it corresponds to
+something that's explicitly instantiated, then that invocation should be
+suppressed.
+
+This preserves the property that instance templates provide interface
+translation layers.  For example, we can imagine making a particular
+invocation more convenient by introducing a new instance template.  If we did
+not have this transitivity, then we'd get different overlap behavior, and this
+desirable property wouldn't be preserved.
+
 
 Why?
 ====
@@ -247,6 +281,10 @@ comparatively minimal issues:
   in the event that the dependencies specify this pragma?  Is there any
   precedent for language extensions doing this?
 
+  [Niklas Broberg's take on this, in the context of superclass default instances]
+  http://www.mail-archive.com/glasgow-haskell-users@haskell.org/msg20351.html">
+  </a>
+
   If ConstraintKinds is used as the mechanism that allows for naming the set
   of derived instances, then this would also mean that -XConstraintKinds would
   need to be implicit in users of instance templates.  This is not so
@@ -264,12 +302,35 @@ comparatively minimal issues:
       place for superclass instance defaults to work out while preserving this
       mobility-of-instances property.
 
-
     - The difference in behavior found when moving an instance out of a module
       can actually be beneficial - we can use an instance template which
       overlaps with those defined in the module, even if its definition
       doesn't know about them!  All of the generated instances that overlap
       with the ones that already exist will be suppressed.
+
+* Referencing other inference templates is what informs their subsumption
+  behavior.  This can be somewhat problematic for the metaphor that instance
+  templates are translation layers / imply one set of APIs in terms of another,
+  because if we do so, and substitute the original invocation with this new one,
+  the overlaps resolution changes.
+
+    - A design for the overlap resolution that I'd originally entertained was
+
+
+
+    - A work-around for this is to create a chain of templates.  In other words,
+      before we had (where --> is "instantiates"):
+
+      <verbatim>
+        deriver A --> deriver B --> class C
+      </verbatim>
+
+      This relies on the idea that we can create parameters with default values
+      that inform which template was used to create the instances.  This is an
+      ugly solution, because then every method that differs between the two
+      templates 
+
+    - One resolution to this that I quite like
 
 
 More Stuff
