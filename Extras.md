@@ -1,3 +1,27 @@
+First Class Modules
+===================
+
+[The first class modules paper](http://research.microsoft.com/en-
+us/um/people/simonpj/Papers/first-class-modules/first_class_modules.pdf)
+provides one potential solution for unifying record types and the module
+system of Haskell.  I do not understand how typeclasses work in the proposed
+system, but it would make sense that they would have a representation very
+related to the one used for modules / records, since they contain much the
+same thing.
+
+Module functors in ML allow definitions and types to be similarly parameterized
+on input parameters.
+
+[This paper](http://www.stefanwehr.de/publications/Wehr_ML_modules_and_Haskell_type_classes.pdf)
+gives a translation between first class modules and typeclasses.  I wish I'd
+realized this earlier in the design process!  It may suggest a superior de-
+sugaring (instead of having TH that writes TH-utilizing code).  The current
+de-sugaring has some similarities - it needs to use a dummy datatype to give
+identity to the functor.  The main difference is that the parameters are
+provided via superclass constraint (avoiding repetition), whereas here we
+provide them via where declarations.
+
+
 Interaction with -XDefaultSignatures
 ====================================
 
@@ -73,8 +97,8 @@ types.
 
 
 Here's a design goal from the superclass instances write-up. It's given
-as the reason that an "Opt-In" scheme such as this is undesirable,
-without much further explanation.
+as the reason that an "Opt-In" scheme is undesirable, without much further
+explanation.
   
 > Design goal 1: a class C can be re-factored into a class C with a
 > superclass, without disturbing any clients.
@@ -108,7 +132,6 @@ we end up with a ton of funky restrictions:
 
 This is also a weakness in the Strathyclyde Haskell Enhancement's
 implementation of default superclass instances.
-
 
 
 
