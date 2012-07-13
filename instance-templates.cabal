@@ -19,13 +19,15 @@ Source-Repository head
 
 Library
   Hs-Source-Dirs:    src
-
+  ghc-options:       -Wall
   Exposed-modules:   Language.Haskell.InstanceTemplates
   Build-depends:     base >= 3.0 && < 6,
+                     containers,
                      directory,
                      filepath,
                      haskell-src-meta,
                      haskell-src-exts,
                      random,
+                     syb,
                      template-haskell,
                      th-lift

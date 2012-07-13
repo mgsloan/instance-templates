@@ -37,7 +37,7 @@ processExample name
   $ rewriteHaskell processModule
  where
   processModule path (Module mloc header pragmas imps decls) = do
-    let nameGen number = dropExtension path ++ "Class" ++ show number ++ ".hs"
+    let nameGen number = dropExtension path ++ className n ++ ".hs"
         imps' = withNewPrelude imps
 
     when (not $ null classes) $ do
@@ -46,16 +46,19 @@ processExample name
 
       let header' = Just . plainHeader
                   $ maybe (takeBaseName classFile)
-                          ((++ ("Class" ++ show number)) . headerName)
+                          ((++ className number) . headerName)
                           header
-          classModule = Module es header' (addTH []) imps' classes
+          classModule = Module es header' (addExts []) imps' classes
           classDerivers = concatMap doClass classes
 
       writeFile classFile $ prettyPrint classModule ++ "\n" ++ classDerivers
     --TODO: import class module
-    return . Module mloc header (addTH pragmas) imps'
+    return . Module mloc header (addExts pragmas) imps'
            $ doInstances insts : others
    where
+    className 0 = "Class"
+    className n = "Class" ++ show n
+
     (insts, partition isClass -> (classes, others))
       = partition isInstance decls
 
@@ -75,7 +78,7 @@ processExample name
       process (InstDecl _ _ _ decls)
         = App es
         ( App es
-          (Var es (UnQual es $ Ident es "derive"))
+          (Var es (UnQual es $ Ident es "deriver"))
           (Con es (UnQual es $ Ident es "Instance")) )
         ( QuasiQuote es "d" $ maybe "" showDecls decls )
       showDecls = concat . intersperse "\n" . map prettyPrint
@@ -104,7 +107,14 @@ modWhen :: (a -> a) -> (a -> Bool) -> a -> a
 modWhen f g x = if g x then f x else x
 
 
-addTH = addExtensions ["TemplateHaskell", "QuasiQuotes"]
+addExts = addExtensions
+  [ "TemplateHaskell"
+  , "QuasiQuotes"
+  , "ConstraintKinds"
+  , "ScopedTypeVariables"
+  , "EmptyDataDecls"
+  , "FlexibleInstances"
+  ]
 
 addExtensions exts = map process
  where
