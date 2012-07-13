@@ -113,6 +113,8 @@ instance' qctx tparam qds = do
 
 -- TODO: do reify checks for existing instances.
 
+-- TODO: derive Typeable for anything that needs it.
+
 -- Instantiates a set of instance templates
 instantiate :: [Q TemplateOutput] -> DecsQ
 instantiate qdos = do
@@ -257,7 +259,6 @@ data TV_c3 a b c deriving Typeable
 classHead :: a
 classHead = undefined
 
-
 -- The result of parsing.
 
 data TemplateRep = TemplateRep Dec [Dec]
@@ -280,6 +281,11 @@ deriving' = QuasiQuoter undefined undefined undefined
 --
 -- * Handle default definitions
 --
+-- * Handle inheriting methods from whereless instances.  The mechanism here
+--   be built into the code that checks the provided declarations, and should
+--   suppress providing definitions for those methods in the whereless
+--   instances.
+--
 -- * Consider how the generated type synonym works if superclass constraints
 --   are allowed on the instances...
 
@@ -298,8 +304,9 @@ buildTemplate
 
   | otherwise = do
       dd <- template_decl
-      return [type_decl, data_decl, dd]
+      return [data_decl, dd]
  where
+  -- TODO: re-enable once GHC 7.6 is released
   type_decl = TySynD inp_name inp_tvs . mkTupleT
             $ [ty | Just ty <- map predToType inp_cxt]
            ++ [ty | (InstanceD _ ty _) <- insts]
@@ -410,7 +417,7 @@ buildTemplate _
 -- Note: Due to lack of TH support for constraint kinds, equality
 -- constraints aren't supported.
 predToType :: Pred -> Maybe Type
-predToType (ClassP n ts) = Just $ foldl AppT (VarT n) ts
+predToType (ClassP n ts) = Just $ foldl AppT (ConT n) ts
 predToType _ = Nothing
 
 mkTupleT :: [Type] -> Type
@@ -436,11 +443,18 @@ allNames = listify (const True :: Name -> Bool)
 -- TODO: put this in different package, so that we can have people use it
 --  without the Exts dependencies.
 
+debug x = trace (show x) x
+
 parseTemplate :: String -> TemplateRep
 parseTemplate input
-  = TemplateRep (head . fromLeft $ Exts.parseDecs top)
-               (       fromLeft $ Exts.parseDecs insts)
+  = TemplateRep (head $ parseFail "template head"      $ debug top)
+                (       parseFail "template instances" $ debug insts)
  where
+  parseFail typ code = either (error . (++ msg)) id $ Exts.parseDecs code
+   where
+    msg = "\nError occurred while parsing the " ++ typ
+       ++ ", consisting of:\n" ++ code
+
   (top, insts) = helper input
 
   helper :: String -> (String, String)
@@ -454,7 +468,7 @@ parseTemplate input
 
     recurse p = bizip (++) (++) p . helper
 
-    decl = "instance" ++ typ ++ "where"
+    decl = "instance" ++ typ ++ "where\n"
 
     (body, rest') = case splitFind "{" rest of
       Just (pre, post) | all isSpace pre
