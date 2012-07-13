@@ -227,7 +227,7 @@ comparatively minimal issues:
   precedent for language extensions doing this?
 
   [Niklas Broberg's take on this, in the context of superclass default instances]
-  (http://www.mail-archive.com/glasgow-haskell-users@haskell.org/msg20351.html")
+  (http://www.mail-archive.com/glasgow-haskell-users@haskell.org/msg20351.html)
 
   If ConstraintKinds is used as the mechanism that allows for naming the set
   of derived instances, then this would also mean that -XConstraintKinds would
