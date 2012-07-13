@@ -306,6 +306,7 @@ module B where
 
 
 -- Split methods into different classes
+{-# LANGUAGE InstanceTemplates #-}
 module A where
 deriving class Foo a where
   instance B.Foo a

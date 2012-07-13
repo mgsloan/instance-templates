@@ -157,7 +157,7 @@ before, which leads to some things to consider:
 
 
 Why?
-====
+----
 
 * It's simple.  We're just supplying values to a generic instance, to create a
   specific one, and these parameters are referentially transparent.
@@ -203,7 +203,7 @@ Why?
 
 
 "Problems"
-==========
+----------
 
 No potential solution to the "default superclass instances" is without its
 trade-offs.  I think that the described solution is a straightforward,
@@ -254,7 +254,7 @@ comparatively minimal issues:
 
 
 More Stuff
-==========
+----------
 
 There's a bit more to say about this idea!
 
@@ -269,10 +269,10 @@ There's a bit more to say about this idea!
 
 
 Credits
-=======
+-------
 
-The following people (and a few others!) all gave me invaluable encouragement,
-feedback, and insights in the process of refining this document and its ideas:
+The following people (and a few others!) all gave me invaluable encouragement
+and feedback in the process of working on this proposal and prototype:
 
 * Edward Kmett
 * Luite Stegeman
