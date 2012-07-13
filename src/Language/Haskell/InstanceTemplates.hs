@@ -90,11 +90,8 @@ conNames (ForallC _ _ c) = conNames c
 
 instance' :: Template a => TypeQ -> a -> DecsQ -> Q TemplateOutput
 instance' qctx tparam qds = do
-  runIO $ print "a"
   ds <- qds
-  runIO $ print "b"
   ctx <- qctx
-  runIO $ print "c"
   let names    = concatMap decNames ds
       rewrites = M.fromList . zip names $ map rewrite names
       subst n  = maybe n id $ M.lookup n rewrites
@@ -224,8 +221,6 @@ thTypeRep :: TypeRep -> Type
 thTypeRep tr = foldl AppT (thTyCon (typeRepTyCon tr))
              $ map thTypeRep (typeRepArgs tr)
 
-debug x = trace (show x) x
-
 thTyCon :: TyCon -> Type
 thTyCon tc = ConT $ Name (mkOccName $ tyConName tc) NameS
 {-
@@ -234,8 +229,8 @@ This was removed because making instances of stuff like:
     Not in scope: type constructor or class `GHC.Types.Int'
 
 -- TODO: Invoke NameQ / NameS when package / module info are empty? Necessary?
-  $ NameG DataName (mkPkgName . debug $ tyConPackage tc) 
-                   (mkModName . debug $ tyConModule  tc)
+  $ NameG DataName (mkPkgName $ tyConPackage tc) 
+                   (mkModName $ tyConModule  tc)
  -}
 
 -- Builds a dummy data-type representing polymorphic variables.
