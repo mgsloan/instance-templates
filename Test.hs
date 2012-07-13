@@ -20,8 +20,8 @@ type Foo a b = Bar a
 data Foo_Template a b
 instance (Typeable a, Typeable b) => Template (Foo_Template a b) where
   invokeTemplate _ cxt decls
-    = DeriverOutput (AppT (AppT (ConT $ mkName "Foo") ty_a) ty_b)
-    $ [DInstance
+    = TemplateOutput (AppT (AppT (ConT $ mkName "Foo") ty_a) ty_b)
+    $ [TInstance
          cxt
          (AppT
             (ConT (Name (mkOccName "Bar") NameS))

@@ -3,6 +3,7 @@
   , DeriveDataTypeable
   , EmptyDataDecls
   , KindSignatures
+  , PatternGuards
   , QuasiQuotes
   , TemplateHaskell
   , TupleSections
@@ -14,7 +15,7 @@ module Language.Haskell.InstanceTemplates
 
   -- Things the generated code depends on
 
-  , DInstance(..), DeriverOutput(..), tvType
+  , TInstance(..), TemplateOutput(..), tvType
 
   , Typeable
   , TV_a , TV_b , TV_c
@@ -47,25 +48,22 @@ import qualified Language.Haskell.Meta as Exts
 
 
 -- Just like the InstanceD constructor, but not inside a large sum-type.
-data DInstance = DInstance Cxt Type [Dec]
+data TInstance = TInstance Cxt Type [Dec]
   deriving (Eq, Show)
 
-$(deriveLift ''DInstance)
+$(deriveLift ''TInstance)
 
-instanceTy   :: DInstance -> Type
-instanceDecl :: DInstance -> Dec
+instanceTy   :: TInstance -> Type
+instanceDecl :: TInstance -> Dec
 
-instanceTy (DInstance _ t _) = t
-instanceDecl (DInstance c t ds) = InstanceD c t ds
+instanceTy (TInstance _ t _) = t
+instanceDecl (TInstance c t ds) = InstanceD c t ds
 
-data DeriverOutput = DeriverOutput Type [DInstance]
+data TemplateOutput = TemplateOutput Type [TInstance]
   deriving (Eq, Show)
-
--- Gotta make the deriver generate deriver invocations instead of generating
--- instances.  Gotta have a special deriver for directly wrapping classes.
 
 class Template a where
-  invokeTemplate :: a -> Cxt -> [Dec] -> DeriverOutput
+  invokeTemplate :: a -> Cxt -> [Dec] -> TemplateOutput
 
 -- Yields all of the names that the declaration introduces.
 -- Note that duplication might occur from data declarations.
@@ -80,8 +78,8 @@ decNames (DataInstD    _ _ _ c _      ) = concatMap conNames c
 decNames (NewtypeInstD _ _ _ c _      ) = conNames c
 decNames (ValD     (VarP n) _ _       ) = [n]
 decNames (ForeignD (ImportF _ _ _ n _)) = [n]
-decNames _                              = []
 -- Handles InstanceD, SigD, ForeignD (ExportF ...), PragmaD, TySynInstD
+decNames _                              = []
 
 conNames :: Con -> [Name]
 conNames (NormalC n _  ) = [n]
@@ -90,7 +88,7 @@ conNames (InfixC  _ n _) = [n]
 conNames (ForallC _ _ c) = conNames c
 
 
-instance' :: Template a => TypeQ -> a -> DecsQ -> Q DeriverOutput
+instance' :: Template a => TypeQ -> a -> DecsQ -> Q TemplateOutput
 instance' qctx tparam qds = do
   runIO $ print "a"
   ds <- qds
@@ -119,18 +117,18 @@ instance' qctx tparam qds = do
 -- TODO: do reify checks for existing instances.
 
 -- Instantiates a set of instance templates
-instantiate :: [Q DeriverOutput] -> DecsQ
+instantiate :: [Q TemplateOutput] -> DecsQ
 instantiate qdos = do
   dos <- sequence qdos
   return
-    . concatMap (\(DeriverOutput _ xs) -> map instanceDecl xs)
+    . concatMap (\(TemplateOutput _ xs) -> map instanceDecl xs)
     . subsume
-    . sortBy (comparing (\(DeriverOutput _ xs) -> length xs))
+    . sortBy (comparing (\(TemplateOutput _ xs) -> length xs))
     $ dos
  where
-  subsume (cur@(DeriverOutput dhead ds):xs) = cur : map process xs
+  subsume (cur@(TemplateOutput dhead ds):xs) = cur : map process xs
    where
-    process unmodified@(DeriverOutput dhead' ds') =
+    process unmodified@(TemplateOutput dhead' ds') =
       case (length results, length just_results) of
         (lr, ljr)
 
@@ -141,7 +139,7 @@ instantiate qdos = do
                  ++ ":\n"
                  ++ err_instances
                   )
-           . DeriverOutput dhead'
+           . TemplateOutput dhead'
            $ filter (`notElem` map fst just_results) ds'
 
          | lr == ljr
@@ -263,14 +261,18 @@ data TV_c3 a b c deriving Typeable
 
 -- The result of parsing.
 
-data DeriverRep = DeriverRep Dec [Dec]
+data TemplateRep = TemplateRep Dec [Dec]
   deriving (Eq, Show, Data, Typeable)
 
 deriving' :: QuasiQuoter
 deriving' = QuasiQuoter undefined undefined undefined
-                        (buildDeriver . parseDeriver)
+                        (buildTemplate . parseTemplate)
 
 -- TODO list
+--
+-- * Make the template generate template invocations instead of generating
+--   instances.  Have a special invocation for directly wrapping classes?
+--
 -- * Handle type / data families
 --
 -- * Add the ability to hide generated instances.
@@ -279,24 +281,24 @@ deriving' = QuasiQuoter undefined undefined undefined
 --
 -- * Handle default definitions
 --
--- TODO: consider how the generated type synonym works if superclass
---       constraints are allowed on the instances...
+-- * Consider how the generated type synonym works if superclass constraints
+--   are allowed on the instances...
 
--- Takes a code representation of a deriver and generate an instance which, when
--- invoked, builds a particular instance of the deriving class.
-buildDeriver :: DeriverRep -> DecsQ
-buildDeriver
- rep@(DeriverRep (ClassD inp_cxt inp_name inp_tvs inp_fds inp_ds) insts)
+-- | Takes a code representation of a template and generate an instance which,
+--   when invoked, builds a particular instance of the deriving class.
+buildTemplate :: TemplateRep -> DecsQ
+buildTemplate
+ rep@(TemplateRep (ClassD inp_cxt inp_name inp_tvs inp_fds inp_ds) insts)
   | not (null inp_fds)
   = error "Functional dependencies not allowed in instance templates."
 
---TODO: It /might/ be nice to be able to have instance derivers that generate
+--TODO: It /might/ be nice to be able to have instance templates that generate
 --      no instances..
   | null insts
-  = error "Instance deriver must generate some instances."
+  = error "Instance template must generate some instances."
 
   | otherwise = do
-      dd <- deriver_decl
+      dd <- template_decl
       return [type_decl, data_decl, dd]
  where
   type_decl = TySynD inp_name inp_tvs . mkTupleT
@@ -322,9 +324,9 @@ buildDeriver
   
   -- TODO: resolve kind arities by reifying the constraints and doing kind
   -- inference.  For now * is assumed unless an explicit sig is given.
-  deriver_decl :: DecQ
-  deriver_decl = do
-    expr <- [e| DeriverOutput
+  template_decl :: DecQ
+  template_decl = do
+    expr <- [e| TemplateOutput
                   $( lift out_head )
                   $( listE $ map (lift . mk_inst) insts )
               |]
@@ -357,7 +359,7 @@ buildDeriver
        | otherwise       = show $ tvArity tv 
 
   mk_inst (InstanceD ctx typ decs)
-    = DInstance (inp_cxt ++ ctx) typ $ map mk_dec decs
+    = TInstance (inp_cxt ++ ctx) typ $ map mk_dec decs
   mk_inst _
     = error "Instance Templates can only contain parameters and instances."
 
@@ -401,10 +403,10 @@ buildDeriver
   empty0 0 = ""
   empty0 n = show n
 
-buildDeriver _
+buildTemplate _
   = error "Instance Template syntax must resemble class declarations."
 
--- Utils for buildDeriver
+-- Utils for buildTemplate
 
 -- Note: Due to lack of TH support for constraint kinds, equality
 -- constraints aren't supported.
@@ -430,14 +432,14 @@ kindArity (ArrowK _ r) = 1 + kindArity r
 allNames :: Data d => d -> [Name]
 allNames = listify (const True :: Name -> Bool)
 
--- The parser for deriver' quasi-quotes.
+-- The parser for deriving' quasi-quotes.
 
 -- TODO: put this in different package, so that we can have people use it
 --  without the Exts dependencies.
 
-parseDeriver :: String -> DeriverRep
-parseDeriver input
-  = DeriverRep (head . fromLeft $ Exts.parseDecs top)
+parseTemplate :: String -> TemplateRep
+parseTemplate input
+  = TemplateRep (head . fromLeft $ Exts.parseDecs top)
                (       fromLeft $ Exts.parseDecs insts)
  where
   (top, insts) = helper input
@@ -467,7 +469,7 @@ parseDeriver input
          $ lines (' ':rest)
   helper str = (str, "")
 
--- Utils for the deriverParser
+-- Utils for the templateParser
 
 -- | Parse mode with all extensions and no fixities.
 parseMode :: Exts.ParseMode
