@@ -11,17 +11,17 @@
   #-}
 
 module Language.Haskell.InstanceTemplates 
-  ( Template(..), instantiate, instance', mkTV, deriving'
+  ( deriving', instantiate, instance', classHead
 
-  -- Things the generated code depends on
-
-  , TInstance(..), TemplateOutput(..), tvType
-
-  , Typeable
+  , mkTV
   , TV_a , TV_b , TV_c
   , TV_a1, TV_b1, TV_c1
   , TV_a2, TV_b2, TV_c2
   , TV_a3, TV_b3, TV_c3
+
+  -- Things the generated code depends on
+  , Template(..), TInstance(..), TemplateOutput(..), tvType
+  , Typeable
   ) where
 
 import Control.Arrow         ( first, second, (***) )
@@ -253,6 +253,10 @@ data TV_c2 a b   deriving Typeable
 data TV_a3 a b c deriving Typeable
 data TV_b3 a b c deriving Typeable
 data TV_c3 a b c deriving Typeable
+
+classHead :: a
+classHead = undefined
+
 
 -- The result of parsing.
 

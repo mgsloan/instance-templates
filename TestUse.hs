@@ -7,7 +7,7 @@ import Language.Haskell.TH
 import Test
 
 $(instantiate
- [instance' [t| () |] (undefined :: Foo_Template (Int, TV_a) TV_b)
+ [instance' [t| () |] (classHead :: Foo_Template (Int, TV_a) TV_b)
    [d|
      foo = (5, undefined)
    |]
