@@ -2,7 +2,7 @@
 
 module Templates where
 
-import qualified Classes as C
+import qualified Classes as D
 import Language.Haskell.InstanceTemplates
 
 import Language.Haskell.TH.Syntax -- This is just for prettier -ddump-splices
@@ -12,16 +12,16 @@ import Language.Haskell.TH.Syntax -- This is just for prettier -ddump-splices
 
 -- TODO: use nested instantiations once they work.
 
-type Functor f = C.Functor f
+type Functor f = D.Functor f
 
 $(mkTemplate =<< [d|
   class Functor f where
     fmap :: a -> f a
-  instance C.Functor f where
+  instance D.Functor f where
     map = fmap
  |] )
 
-type Applicative f = (C.Functor f, C.Applicative f)
+type Applicative f = (D.Functor f, D.Applicative f)
 
 $(mkTemplate =<< [d|
   class Applicative f where
@@ -34,35 +34,41 @@ $(mkTemplate =<< [d|
     a *> b = const    <$> a <*> b
     -}
   
-  instance C.Functor f where
+  instance D.Functor f where
     map f x = pure f <*> x
   
-  instance C.Applicative f where
+  instance D.Applicative f where
     pure  = pure
     (<*>) = (<*>)
     (*>)  = (*>)
     (<*)  = (<*)
  |] )
 
-{-
-deriving class Monad m where
-  (>>=)  :: m a -> (a -> m b) -> m b
-  (>>)   :: m a ->       m b  -> m b
-  return :: a      -> m a
-  fail   :: String -> m a
+type Monad a = D.Monad a
 
-  m >> k = m >>= \_ -> k
-  fail = error
+$(mkTemplate =<< [d|
+  class Monad m where
+    (>>=)  :: m a -> (a -> m b) -> m b
+    (>>)   :: m a ->       m b  -> m b
+    return :: a      -> m a
+    fail   :: String -> m a
 
-  -- Note! This instantiates the template above
-  instance Applicative m where
-    return = return
+    {- TODO
+    m >> k = m >>= \_ -> k
+    fail = error
+    -}
+
+  instance D.Functor m where
+    map f x = D.pure f D.<*> x
+
+  instance D.Applicative m where
+    pure = return
     l <*> r = l >>= \f ->
               r >>= \x -> return (f x)
 
-  instance C.Monadic m where
+  instance D.Monad m where
     (>>=) = (>>=)
 
-  instance C.MonadFail m where
+  instance D.MonadFail m where
     fail = fail
--}
+ |] )

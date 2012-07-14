@@ -11,7 +11,7 @@
   #-}
 
 module Language.Haskell.InstanceTemplates 
-  ( mkTemplate, instantiate, instance'
+  ( mkTemplate, instantiate, template
 
   -- * Things that generated code depends on
   , Template(..), TInstance(..), TemplateOutput(..), processHead
@@ -67,13 +67,13 @@ processHead typ = (l, tail $ tyUnApp r)
 -- Note that duplication might occur from data declarations.
 decNames :: Dec -> [Name]
 decNames (FunD         n _            ) = [n]
-decNames (DataD        _ n _ c _      ) = n : concatMap conNames c
-decNames (NewtypeD     _ n _ c _      ) = n : conNames c
 decNames (TySynD       n _ _          ) = [n]
+decNames (FamilyD      _ n _ _        ) = [n]
+decNames (NewtypeD     _ n _ c _      ) = n : conNames c
+decNames (DataD        _ n _ c _      ) = n : concatMap conNames c
 decNames (ClassD       _ n _ _ d      ) = n : concatMap decNames d
 --It's weird to have this, but necessary for my use here...
 decNames (InstanceD    _ _ d          ) = concatMap decNames d
-decNames (FamilyD      _ n _ _        ) = [n]
 decNames (DataInstD    _ _ _ c _      ) = concatMap conNames c
 decNames (NewtypeInstD _ _ _ c _      ) = conNames c
 decNames (ValD         p _ _          ) = patNames p
@@ -118,8 +118,8 @@ infoName (TyVarI     n _    ) = n
 
 -- Convenience function for use with TH AST quoters
 
-instance' :: Template a => a -> TypeQ -> DecsQ -> Q TemplateOutput
-instance' tparam qty qds = do
+template :: Template a => a -> TypeQ -> DecsQ -> Q TemplateOutput
+template tparam qty qds = do
   ds <- qds
   ty <- qty
   let ty' = everywhere (id `extT` deUniqueTVs) ty
@@ -151,13 +151,11 @@ deUniqueNames names = everywhere (id `extT` subst)
 
 -- Instantiates a set of instance templates
 instantiate :: [Q TemplateOutput] -> DecsQ
-instantiate qdos = do
-  dos <- sequence qdos
-  return
-    . concatMap (\(TemplateOutput _ xs) -> map instanceDecl xs)
+instantiate qdos
+  = ( concatMap (\(TemplateOutput _ xs) -> map instanceDecl xs)
     . subsume
     . sortBy (comparing (\(TemplateOutput _ xs) -> length xs))
-    $ dos
+    ) <$> sequence qdos
  where
   subsume (cur@(TemplateOutput dhead ds):xs) = cur : map process xs
    where
@@ -235,7 +233,7 @@ tyOverlap (AppT l r) (AppT l' r') = case (tyOverlap l l', tyOverlap r r') of
   (_, NonOverlapping) -> NonOverlapping
   (   Overlapping, _) ->    Overlapping
   (_,    Overlapping) ->    Overlapping
-  _                   -> VarEquivalent  -- All that's left
+  _                   -> VarEquivalent
 tyOverlap x y
   | x == y    =    Overlapping
   | otherwise = NonOverlapping
@@ -273,8 +271,7 @@ This was removed because making instances of stuff like:
 --
 -- * Catch kind errors at instance-build time (better yet infer them!)
 --   http://hackage.haskell.org/package/th-kinds
---
--- * Allow local declarations that shadow global ones (yikes!)
+
 
 -- | Takes a code representation of a template and generate an instance which,
 --   when invoked, builds a particular instance of the deriving class.
