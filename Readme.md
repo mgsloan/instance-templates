@@ -182,7 +182,7 @@ Why?
   the superclass of the instance.  I think it's preferable to be able to "hide"
   this class so that it can't be depended on.
 
-* Avoidance of TH.
+* Avoidance of Template Haskell.
 
   - The TH implementation of this library generates TH code.  In other words,
     it's making it convenient to write code that was already quite possible to
