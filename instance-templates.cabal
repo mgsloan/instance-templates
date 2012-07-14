@@ -27,7 +27,6 @@ Library
                      filepath,
                      haskell-src-meta,
                      haskell-src-exts,
-                     random,
                      syb,
                      template-haskell,
                      th-lift

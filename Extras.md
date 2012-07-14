@@ -31,6 +31,23 @@ Interaction with -XGenericDeriving
 TODO: fill out these sections. Rest assured, these are very positive
 interactions!
 
+http://hackage.haskell.org/trac/ghc/ticket/5462
+
+Interaction with -XTemplateHaskell
+==================================
+
+Syntax Ideas / Alternatives
+===========================
+
+`deriving class` was chosen because it uses pre-existing keywords, and gives a
+pretty good idea of the meaning of the declaration.  However, it does not make
+much sense when contrasted with the meaning of `deriving instance`, used for 
+`-XStandaloneDeriving`.
+
+This could be made more consistent by throwing warnings whenever instance
+templates are invoked through regular instance syntax, encouraging the
+pre-pending of `deriving`.  Then, `deriving instance` could be used for both
+standalone deriving and instance templates.
 
 Scope-Restricted Weak Typing
 ============================

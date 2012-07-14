@@ -11,28 +11,19 @@
   #-}
 
 module Language.Haskell.InstanceTemplates 
-  ( deriving', instantiate, instance', classHead
+  ( mkTemplate, instantiate, instance'
 
-  , mkTV
-  , TV_a , TV_b , TV_c
-  , TV_a1, TV_b1, TV_c1
-  , TV_a2, TV_b2, TV_c2
-  , TV_a3, TV_b3, TV_c3
-
-  -- Things the generated code depends on
-  , Template(..), TInstance(..), TemplateOutput(..), tvType
-  , Typeable
+  -- * Things that generated code depends on
+  , Template(..), TInstance(..), TemplateOutput(..), processHead
   ) where
 
-import Control.Arrow         ( first, second, (***) )
 import Control.Applicative   ( (<$>) )
 
-import Data.Char             ( isSpace )
 import Data.Function         ( on )
 import Data.Generics         ( Data, listify, everywhere )
 import Data.Generics.Aliases ( extT )
-import Data.Typeable         ( Typeable(..), TypeRep, TyCon, typeRepTyCon, typeRepArgs, tyConName ) -- , tyConPackage, tyConModule )
-import Data.List             ( find, isPrefixOf, inits, tails, sortBy )
+import Data.Typeable         ( Typeable(..) )
+import Data.List             ( find, sortBy )
 import Data.Maybe            ( fromJust, catMaybes )
 import Data.Ord              ( comparing )
 import qualified Data.Map as M
@@ -40,16 +31,16 @@ import qualified Data.Map as M
 import Debug.Trace ( trace )
 
 import Language.Haskell.TH
-import Language.Haskell.TH.Quote ( QuasiQuoter(..) )
 import Language.Haskell.TH.Syntax
 import Language.Haskell.TH.Lift ( deriveLift )
-import qualified Language.Haskell.Exts as Exts
-import qualified Language.Haskell.Meta as Exts
 
+-- TODO: replace with an orphans package, with the code from:
+-- https://github.com/mgsloan/quasi-extras/blob/5ab894f9868324698f2c9d6d8b9acfc79bf76a9c/reifyQ.hs
+import Language.Haskell.Meta ()
 
 -- Just like the InstanceD constructor, but not inside a large sum-type.
 data TInstance = TInstance Cxt Type [Dec]
-  deriving (Eq, Show)
+  deriving (Eq, Show, Data, Typeable)
 
 $(deriveLift ''TInstance)
 
@@ -63,7 +54,14 @@ data TemplateOutput = TemplateOutput Type [TInstance]
   deriving (Eq, Show)
 
 class Template a where
-  invokeTemplate :: a -> Cxt -> [Dec] -> TemplateOutput
+  invokeTemplate :: a -> Type -> [Dec] -> TemplateOutput
+
+processHead :: Type -> ([Pred], [Type])
+processHead typ = (l, tail $ tyUnApp r)
+ where
+  (l, r) = case typ of
+    (ForallT _ ps t) -> (ps, t)
+    t                -> ([], t)
 
 -- Yields all of the names that the declaration introduces.
 -- Note that duplication might occur from data declarations.
@@ -72,11 +70,14 @@ decNames (FunD         n _            ) = [n]
 decNames (DataD        _ n _ c _      ) = n : concatMap conNames c
 decNames (NewtypeD     _ n _ c _      ) = n : conNames c
 decNames (TySynD       n _ _          ) = [n]
-decNames (ClassD       _ n _ _ _      ) = [n]
+decNames (ClassD       _ n _ _ d      ) = n : concatMap decNames d
+--It's weird to have this, but necessary for my use here...
+decNames (InstanceD    _ _ d          ) = concatMap decNames d
 decNames (FamilyD      _ n _ _        ) = [n]
 decNames (DataInstD    _ _ _ c _      ) = concatMap conNames c
 decNames (NewtypeInstD _ _ _ c _      ) = conNames c
-decNames (ValD     (VarP n) _ _       ) = [n]
+decNames (ValD         p _ _          ) = patNames p
+decNames (SigD         n _            ) = [n]
 decNames (ForeignD (ImportF _ _ _ n _)) = [n]
 -- Handles InstanceD, SigD, ForeignD (ExportF ...), PragmaD, TySynInstD
 decNames _                              = []
@@ -87,25 +88,58 @@ conNames (RecC    n r  ) = n : map (\(x, _, _) -> x) r
 conNames (InfixC  _ n _) = [n]
 conNames (ForallC _ _ c) = conNames c
 
+patNames :: Pat -> [Name]
+patNames (VarP        n     ) = [n]
+patNames (TupP        p     ) = concatMap patNames p
+patNames (UnboxedTupP p     ) = concatMap patNames p
+patNames (InfixP      l _ r ) = patNames l ++ patNames r
+patNames (UInfixP     l _ r ) = patNames l ++ patNames r
+patNames (ParensP     p     ) = patNames p
+patNames (BangP       p     ) = patNames p
+patNames (TildeP      p     ) = patNames p
+patNames (AsP         n p   ) = n : patNames p
+patNames (RecP        _ f   ) = concatMap (patNames . snd) f
+patNames (ListP       p     ) = concatMap patNames p
+patNames (SigP        p t   ) = patNames p
+patNames (ViewP       e p   ) = patNames p
+patNames _                    = []
 
-instance' :: Template a => TypeQ -> a -> DecsQ -> Q TemplateOutput
-instance' qctx tparam qds = do
+{- TODO: remove
+infoName :: Info -> Name
+infoName (ClassI     d _    ) = head $ decNames d
+infoName (ClassOpI   n _ _ _) = n
+infoName (TyConI     d      ) = head $ decNames d
+infoName (FamilyI    d _    ) = head $ decNames d
+infoName (PrimTyConI n _ _  ) = n
+infoName (DataConI   n _ _ _) = n
+infoName (VarI       n _ _ _) = n
+infoName (TyVarI     n _    ) = n
+-}
+
+-- Convenience function for use with TH AST quoters
+
+instance' :: Template a => a -> TypeQ -> DecsQ -> Q TemplateOutput
+instance' tparam qty qds = do
   ds <- qds
-  ctx <- qctx
-  let names    = concatMap decNames ds
-      rewrites = M.fromList . zip names $ map rewrite names
-      subst n  = maybe n id $ M.lookup n rewrites
-      ctx'     = case ctx of
-        (ForallT [] ps _) -> ps
-        (ConT n) | nameBase n == "()" -> []
-        _ -> error "Instance context must be in the form of a forall or ()."
-  return $ invokeTemplate tparam
-  -- TODO: might need to also process ClassP, to support Constraint kinds.
-    (everywhere (id `extT` tvType') ctx')
-    (everywhere (id `extT` subst) ds)
+  ty <- qty
+  let ty' = everywhere (id `extT` deUniqueTVs) ty
+      ds' = everywhere (id `extT` deUniqueTVs)
+          $ deUniqueNames (concatMap decNames ds) ds
+  return $ invokeTemplate tparam ty' ds'
+
+deUniqueName :: Name -> Name
+deUniqueName (Name o (NameU _)) = Name o NameS
+deUniqueName n                  = n
+
+deUniqueTVs :: Type -> Type
+deUniqueTVs (VarT n) = VarT $ deUniqueName n
+deUniqueTVs t        = t
+
+deUniqueNames :: Data a => [Name] -> a -> a
+deUniqueNames names = everywhere (id `extT` subst)
  where
-  rewrite (Name o (NameU _)) = Name o NameS
-  rewrite n = n
+  subst n | n `elem` names = deUniqueName n
+          | otherwise = n
 
 -- TODO: Read up on the specifics of OverlappingInstance" and figure out how
 -- they fit into this picture.  Force "hiding" declarations?  Certainly not
@@ -206,25 +240,6 @@ tyOverlap x y
   | x == y    =    Overlapping
   | otherwise = NonOverlapping
 
-tvType :: Typeable a => a -> Type
-tvType = everywhere (id `extT` tvType') . thType
-
-tvType' :: Type -> Type
-tvType' (ConT n)
-  | "TV_" `isPrefixOf` nameBase n = VarT . mkName . drop 3 $ nameBase n
-  | otherwise = ConT n
-tvType' t = t
-
-
-thType :: Typeable a => a -> Type
-thType = thTypeRep . typeOf
-
-thTypeRep :: TypeRep -> Type
-thTypeRep tr = foldl AppT (thTyCon (typeRepTyCon tr))
-             $ map thTypeRep (typeRepArgs tr)
-
-thTyCon :: TyCon -> Type
-thTyCon tc = ConT $ Name (mkOccName $ tyConName tc) NameS
 {-
 This was removed because making instances of stuff like:
 
@@ -234,39 +249,6 @@ This was removed because making instances of stuff like:
   $ NameG DataName (mkPkgName $ tyConPackage tc) 
                    (mkModName $ tyConModule  tc)
  -}
-
--- Builds a dummy data-type representing polymorphic variables.
-mkTV :: Int -> String -> DecsQ
-mkTV a n = do
-  tvs <- mapM (const $ newName "tv") [1..a]
-  let tvs' = map PlainTV tvs
-  return [ DataD [] (mkName $ "TV_" ++ n) tvs' [] [mkName "Typeable"] ]
-
--- Curse the stage restriction!
-data TV_a        deriving Typeable
-data TV_b        deriving Typeable
-data TV_c        deriving Typeable
-data TV_a1 a     deriving Typeable
-data TV_b1 a     deriving Typeable
-data TV_c1 a     deriving Typeable
-data TV_a2 a b   deriving Typeable
-data TV_b2 a b   deriving Typeable
-data TV_c2 a b   deriving Typeable
-data TV_a3 a b c deriving Typeable
-data TV_b3 a b c deriving Typeable
-data TV_c3 a b c deriving Typeable
-
-classHead :: a
-classHead = undefined
-
--- The result of parsing.
-
-data TemplateRep = TemplateRep Dec [Dec]
-  deriving (Eq, Show, Data, Typeable)
-
-deriving' :: QuasiQuoter
-deriving' = QuasiQuoter undefined undefined undefined
-                        (buildTemplate . parseTemplate)
 
 -- TODO list
 --
@@ -288,12 +270,16 @@ deriving' = QuasiQuoter undefined undefined undefined
 --
 -- * Consider how the generated type synonym works if superclass constraints
 --   are allowed on the instances...
+--
+-- * Catch kind errors at instance-build time (better yet infer them!)
+--   http://hackage.haskell.org/package/th-kinds
+--
+-- * Allow local declarations that shadow global ones (yikes!)
 
 -- | Takes a code representation of a template and generate an instance which,
 --   when invoked, builds a particular instance of the deriving class.
-buildTemplate :: TemplateRep -> DecsQ
-buildTemplate
- rep@(TemplateRep (ClassD inp_cxt inp_name inp_tvs inp_fds inp_ds) insts)
+mkTemplate :: [Dec] -> DecsQ
+mkTemplate (top@(ClassD inp_cxt inp_name inp_tvs inp_fds inp_ds) : insts)
   | not (null inp_fds)
   = error "Functional dependencies not allowed in instance templates."
 
@@ -311,15 +297,13 @@ buildTemplate
             $ [ty | Just ty <- map predToType inp_cxt]
            ++ [ty | (InstanceD _ ty _) <- insts]
 
-
   -- TODO: make sure this doesn't reify to anything, etc.
   -- For prototyping purposes, this is OK.
   head_name = mkName $ nameBase inp_name ++ "_Template"
 
-  tvars = map (VarT . tvName) inp_tvs
+  tvars = map (VarT . deUniqueName . tvName) inp_tvs
 
-  data_decl = DataD [] head_name inp_tvs [] []
---    where con = NormalC head_name $ map (NotStrict,) tvars
+  data_decl = DataD [] head_name inp_tvs [NormalC head_name []] []
 
   inst_head = AppT (ConT $ mkName "Template")
             . foldl1 AppT
@@ -333,39 +317,45 @@ buildTemplate
   template_decl :: DecQ
   template_decl = do
     expr <- [e| TemplateOutput
-                  $( lift out_head )
+                  $( lift $ deUniqueNames top_names out_head )
                   $( listE $ map (lift . mk_inst) insts )
               |]
     esub <- ListE . (:[]) <$> lift placeholder
     tsubs <- M.fromList <$> mapM (\(t, e) -> (, e) <$> lift t) unlifted_subs
+
     let expr' = everywhere (id `extT` trans) expr
-        trans x | x == esub = VarE decls_name
+        trans x | x == esub = VarE n_decls
                 | Just v <- M.lookup x tsubs = v
                 | otherwise = x
-    return
-      $ InstanceD (map mk_typeable inp_tvs) inst_head
-      [ FunD (mkName "invokeTemplate") [Clause pats (NormalB expr') wheres] ]
-   where
-    pats = [WildP, VarP cxt_name, VarP decls_name]
-    cxt_name   = mkName "cxt"
-    decls_name = mkName "decls"
-    ty_prefix = available "ty_"
-    (unlifted_subs, wheres) = unzip $ map (mk_where . nameBase . tvName) inp_tvs
 
-  mk_where n = ((VarT $ mkName n, VarE tv), ValD (VarP tv) (NormalB expr) [])
+    tv_dec <- valD (tupP [varP n_ctx, listP $ map return tvpats]) 
+                   (normalB tv_extract)
+                   []
+    return
+      $ InstanceD [] inst_head
+      [ FunD (mkName "invokeTemplate") [Clause pats (NormalB expr') [tv_dec]] ]
+   where
+    pats = [WildP, VarP n_typ, VarP n_decls]
+    n_typ   = mkName "typ"
+    n_ctx   = mkName "ctx"
+    n_decls = mkName "decls"
+    tv_extract = [e|case processHead $(varE n_typ) of
+                      (x, l) | length l == $(tv_len) -> (x, l)
+                             | otherwise -> error $ $(tv_error)
+                   |]
+    tv_len = litE . IntegerL . fromIntegral $ length inp_tvs
+    tv_error = [e| $(litE . StringL $ nameBase inp_name)
+                ++ " expects " ++ show $(tv_len) ++ " class parameter(s)" |]
+    (unlifted_subs, tvpats) = unzip $ map (mk_tv . nameBase . tvName) inp_tvs
+
+  mk_tv n = ((VarT $ mkName n, VarE tv), VarP tv)
    where
     tv = mkName $ "tv_" ++ n
-    expr = AppE (VarE $ mkName "tvType")
-         . SigE (VarE $ mkName "undefined")
-         . VarT $ mkName n
-
-  mk_typeable tv = ClassP (mkName $ "Typeable" ++ tn) [VarT $ tvName tv]
-   where
-    tn | tvArity tv == 1 = ""
-       | otherwise       = show $ tvArity tv 
 
   mk_inst (InstanceD ctx typ decs)
-    = TInstance (inp_cxt ++ ctx) typ $ map mk_dec decs
+    = everywhere (id `extT` deUniqueTVs)
+    . deUniqueNames top_names
+    $ TInstance (inp_cxt ++ ctx) typ $ map mk_dec decs
   mk_inst _
     = error "Instance Templates can only contain parameters and instances."
 
@@ -383,7 +373,7 @@ buildTemplate
        $ "Cannot handle the following in an instance declaration: "
       ++ pprint dec
    where
-    proxy   = available "proxy"
+    proxy   = available "def"
     name    = dec_name dec
     renamed = rename_dec dec proxy
 
@@ -401,16 +391,20 @@ buildTemplate
   rename_dec (FunD _ cs) n' = FunD n' cs
   rename_dec x _ = error $ "Unsupported type of declaration: " ++ show x
 
+  --TODO: remove, as probably unnecessary
   available prefix
     = fromJust
-    . find (`notElem` allNames rep)
-    $ map (mkName . (prefix++) . empty0) ([0..] :: [Int])
+    . find (`notElem` (allNames top ++ allNames insts))
+    $ map (mkName . (prefix ++) . empty0) ([0..] :: [Int])
+
+  top_names = concatMap decNames (top : insts)
 
   empty0 0 = ""
   empty0 n = show n
 
-buildTemplate _
-  = error "Instance Template syntax must resemble class declarations."
+mkTemplate _ = error "First declaration passed to mkTemplate must be a class."
+
+debug x = trace (show x) x
 
 -- Utils for buildTemplate
 
@@ -435,81 +429,15 @@ kindArity :: Kind -> Int
 kindArity StarK = 1
 kindArity (ArrowK _ r) = 1 + kindArity r
 
+tyUnApp :: Type -> [Type]
+tyUnApp = reverse . helper
+ where
+  helper (AppT l r) = r : helper l
+  helper x          = [x]
+
+tyConName :: Type -> Maybe Name
+tyConName (ConT n) = Just n
+tyConName _ = Nothing
+
 allNames :: Data d => d -> [Name]
 allNames = listify (const True :: Name -> Bool)
-
--- The parser for deriving' quasi-quotes.
-
--- TODO: put this in different package, so that we can have people use it
---  without the Exts dependencies.
-
-debug x = trace (show x) x
-
-parseTemplate :: String -> TemplateRep
-parseTemplate input
-  = TemplateRep (head $ parseFail "template head"      $ debug top)
-                (       parseFail "template instances" $ debug insts)
- where
-  parseFail typ code = either (error . (++ msg)) id $ Exts.parseDecs code
-   where
-    msg = "\nError occurred while parsing the " ++ typ
-       ++ ", consisting of:\n" ++ code
-
-  (top, insts) = helper input
-
-  helper :: String -> (String, String)
-  -- Parse derived instance.
-  helper (splitFind "instance" -> Just (leading,
-            (splitFind "where" -> Just (typ, rest))))
-    | leadingIndent > 0 = recurse (leading ++ "\n", decl ++ body ++ "\n") rest'
-    | otherwise         = recurse (leading ++ decl, "")                   rest
-   where
-    leadingIndent = indentLevel $ reverse leading
-
-    recurse p = bizip (++) (++) p . helper
-
-    decl = "instance" ++ typ ++ "where\n"
-
-    (body, rest') = case splitFind "{" rest of
-      Just (pre, post) | all isSpace pre
-        -> first (('{':) . (++"}"))
-         . fromJust
-         $ splitFind "}" post
-
-      _ -> (unlines *** unlines)
-         . break ((<= leadingIndent) . indentLevel)
-         . tail
-         $ lines (' ':rest)
-  helper str = (str, "")
-
--- Utils for the templateParser
-
--- | Parse mode with all extensions and no fixities.
-parseMode :: Exts.ParseMode
-parseMode = Exts.ParseMode
-  { Exts.parseFilename = ""
-  , Exts.extensions = Exts.glasgowExts
-                   ++ [Exts.TupleSections, Exts.BangPatterns, Exts.ViewPatterns]
-  , Exts.ignoreLinePragmas = False
-  , Exts.ignoreLanguagePragmas = False
-  , Exts.fixities = Nothing
-  }
-
-fromLeft :: Either String a -> a
-fromLeft = either error id
-
-splitFind :: String -> String -> Maybe (String, String)
-splitFind xs ys = second (drop $ length xs)
-              <$> (find (isPrefixOf xs . snd) $ zip (inits ys) (tails ys))
-
--- NOTE: assumes that the string is already known to be whitespace.
-indentLevel :: String -> Int
-indentLevel = length . concatMap subst . takeWhile (`elem` " \t")
- where
-  subst '\t' = replicate 8 ' '
-  subst x = [x]
-
--- ekmett's bizip specialized to tuples
-bizip :: (a1 -> a2 -> a3) -> (b1 -> b2 -> b3)
-      -> (a1, b1) -> (a2, b2) -> (a3, b3)
-bizip f g (x, y) (x', y') = (f x x', g y y')

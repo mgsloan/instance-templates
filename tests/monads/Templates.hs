@@ -1,9 +1,11 @@
-{-# LANGUAGE TemplateHaskell, QuasiQuotes, ConstraintKinds, ScopedTypeVariables #-}
+{-# LANGUAGE TemplateHaskell, QuasiQuotes, ConstraintKinds, ScopedTypeVariables, FlexibleInstances #-}
 
 module Templates where
 
 import qualified Classes as C
 import Language.Haskell.InstanceTemplates
+
+import Language.Haskell.TH.Syntax -- This is just for prettier -ddump-splices
 
 -- The instance templates are defined in a separate module because they use new
 -- names
@@ -12,22 +14,25 @@ import Language.Haskell.InstanceTemplates
 
 type Functor f = C.Functor f
 
-[deriving'| class Functor f where
-  fmap :: a -> f a
+$(mkTemplate =<< [d|
+  class Functor f where
+    fmap :: a -> f a
   instance C.Functor f where
     map = fmap
- |]
+ |] )
 
 type Applicative f = (C.Functor f, C.Applicative f)
 
-[deriving'|class Applicative f where
-  pure   :: a -> f a
-  (<*>)  :: f (a -> b) -> f a -> f b
-  (*>)   :: f a -> f b -> f b
-  (<*)   :: f a -> f b -> f a
-  
-  a *> b = const id <$> a <*> b
-  a *> b = const    <$> a <*> b
+$(mkTemplate =<< [d|
+  class Applicative f where
+    pure   :: a -> f a
+    (<*>)  :: f (a -> b) -> f a -> f b
+    (*>)   :: f a -> f b -> f b
+    (<*)   :: f a -> f b -> f a
+    {- TODO
+    a <* b = const id <$> a <*> b
+    a *> b = const    <$> a <*> b
+    -}
   
   instance C.Functor f where
     map f x = pure f <*> x
@@ -37,7 +42,7 @@ type Applicative f = (C.Functor f, C.Applicative f)
     (<*>) = (<*>)
     (*>)  = (*>)
     (<*)  = (<*)
- |]
+ |] )
 
 {-
 deriving class Monad m where
