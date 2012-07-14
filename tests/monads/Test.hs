@@ -1,28 +1,15 @@
 {-# LANGUAGE TemplateHaskell, QuasiQuotes, DeriveDataTypeable, RankNTypes, ConstraintKinds #-}
 module Test where
 
+import Classes ((<$>), (<*>))
 import qualified Classes as D
-import Prelude (Eq, Read, Show, (+))
+import Prelude (Eq, Read, Show, (+), (-))
 import Templates
 import Language.Haskell.InstanceTemplates
 import Prelude (zipWith, repeat, ($), const, id)
 
 newtype ZipList a = ZipList [a]
   deriving (Eq, Read, Show)
-
-$(instantiate
- [template Applicative_Template [t| Applicative ZipList |]
-   [d|
--- instance Applicative ZipList where
-    (ZipList fs) <*> (ZipList xs) = ZipList (zipWith ($) fs xs)
-    pure x                        = ZipList (repeat x)
-
-    (*>) :: D.Applicative f => f a -> f b -> f b
-    (*>) = D.liftA2 (const id)
-    (<*) :: D.Applicative f => f a -> f b -> f a
-    (<*) = D.liftA2 const
-   |]
- ])
 
 data Maybe a = Just a | Nothing
   deriving (Eq, Read, Show)
@@ -41,4 +28,21 @@ $(instantiate
     fail _        =  Nothing
  |] ])
 
-testFunctor = D.map (+1) $ Just 4
+testMaybe = (-) <$> Just 49 <*> Just 7
+
+
+$(instantiate
+ [template Applicative_Template [t| Applicative ZipList |]
+   [d|
+-- instance Applicative ZipList where
+    (ZipList fs) <*> (ZipList xs) = ZipList (zipWith ($) fs xs)
+    pure x                        = ZipList (repeat x)
+
+    (*>) :: D.Applicative f => f a -> f b -> f b
+    (*>) = D.liftA2 (const id)
+    (<*) :: D.Applicative f => f a -> f b -> f a
+    (<*) = D.liftA2 const
+   |]
+ ])
+
+testZipList = (+) <$> ZipList [1,2,3] <*> ZipList [6,5,4]
