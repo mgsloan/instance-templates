@@ -1,12 +1,12 @@
 Examples
 ========
 
-Splitting out Eq / Show
------------------------
+Splitting out Eq / Show from Num
+--------------------------------
 
 With GHC 7.4, one of the first breaking changes (in a while, anyway) was made
-to the Prelude - removing the Eq and Show superclass constraints.  Here's how
-this feature would have made the change non-breaking:
+to the Prelude - removing the Eq and Show superclass constraints from the Num
+class.  Here's how this feature would have made the change non-breaking:
 
 ```haskell
 -- In Prelude
