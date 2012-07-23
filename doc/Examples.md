@@ -92,15 +92,13 @@ A more fine-grained splitting of the numeric hierarchy might look something
 like this:
 
 ```haskell
-class Addable       a where (+)    :: a -> a -> a
-class Multiplicable a where (*)    :: a -> a -> a
-class Subtractable  a where (-)    :: a -> a -> a
-class Negateable    a where negate :: a -> a
-class Absable       a where abs    :: a -> a
-class Signumable    a where signum :: a -> a
-
-class FromIntegerable a where
-  fromInteger :: a -> a
+class Addable         a where (+)    :: a -> a -> a
+class Multiplicable   a where (*)    :: a -> a -> a
+class Subtractable    a where (-)    :: a -> a -> a
+class Negateable      a where negate :: a -> a
+class Absable         a where abs    :: a -> a
+class Signumable      a where signum :: a -> a
+class FromIntegerable a where fromInteger :: a -> a
 
 deriving class Num a where
   instance Addable         a

@@ -1,3 +1,4 @@
+
 First Class Modules
 ===================
 
@@ -21,33 +22,6 @@ identity to the functor.  The main difference is that the parameters are
 provided via superclass constraint (avoiding repetition), whereas here we
 provide them via where declarations.
 
-
-Interaction with -XDefaultSignatures
-====================================
-
-Interaction with -XGenericDeriving
-==================================
-
-TODO: fill out these sections. Rest assured, these are very positive
-interactions!
-
-http://hackage.haskell.org/trac/ghc/ticket/5462
-
-Interaction with -XTemplateHaskell
-==================================
-
-Syntax Ideas / Alternatives
-===========================
-
-`deriving class` was chosen because it uses pre-existing keywords, and gives a
-pretty good idea of the meaning of the declaration.  However, it does not make
-much sense when contrasted with the meaning of `deriving instance`, used for 
-`-XStandaloneDeriving`.
-
-This could be made more consistent by throwing warnings whenever instance
-templates are invoked through regular instance syntax, encouraging the
-pre-pending of `deriving`.  Then, `deriving instance` could be used for both
-standalone deriving and instance templates.
 
 Scope-Restricted Weak Typing
 ============================
@@ -91,11 +65,6 @@ rewriting, we are conceptually introducing the convenience of weak-typing, but
 properly scoped to a known set of definitions / value junctures.
 
 
-Relationship to -XGeneralizedNewtypeDeriving
-============================================
-
-
-
 
 Relationship to Other Proposals
 ===============================
@@ -108,10 +77,7 @@ just disregarded due to some preconceived notions of a desirable mechanism.
 By focusing on extending the typeclass system directly, we end up with a very
 complicated set of trade-offs, that are tough to navigate.  Instead, this
 approach adds an entirely new type of declaration, and adds a new meaning for
-instance declarations.  Rather than "changing" the meaning of instances, we
-are allowing them to be applied to something they couldn't before - constraint
-types.
-
+instance declarations.
 
 Here's a design goal from the superclass instances write-up. It's given
 as the reason that an "Opt-In" scheme is undesirable, without much further
@@ -152,13 +118,13 @@ implementation of default superclass instances.
 
 
 
-Musings on Default Superclass Instances
+Musings on 
 =======================================
 
 Even in the presence of instance templates, default superclass instances would
 be a very useful feature.  With instance templates, we can say "Oops, we
 messed up!", and modify the library that defines a particular class without
-disturbing clients - an excellent step forward. However, if we want to be able
+disturbing clients - an excellent step forward.  However, if we want to be able
 to have clients of that class be able to use our library (which uses a
 different typeclass), with no further work or modification of that library,
 then we're in trouble.
