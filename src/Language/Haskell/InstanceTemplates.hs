@@ -5,6 +5,7 @@
   , KindSignatures
   , PatternGuards
   , QuasiQuotes
+  , ScopedTypeVariables
   , TemplateHaskell
   , TupleSections
   , ViewPatterns
@@ -12,31 +13,36 @@
 
 module Language.Haskell.InstanceTemplates 
   ( mkTemplate, instantiate, template
+  , Inherit, Instance
 
   -- * Things that generated code depends on
-  , Template(..), TInstance(..), TemplateOutput(..), processHead
+  , Template(..), TInstance(..), TemplateOutput(..)
+  , processHead, processInstance, processHiding
   ) where
 
 import Control.Applicative   ( (<$>) )
+import Control.Arrow         ( (***), (&&&) )
+import Control.Monad         ( zipWithM )
+import Control.Monad.State   ( State, evalState, get, put )
 
+import Data.Char             ( isSpace )
 import Data.Function         ( on )
-import Data.Generics         ( Data, listify, everywhere )
-import Data.Generics.Aliases ( extT )
+import Data.Generics         ( Data, listify, everywhere, something, gmapM )
+import Data.Generics.Aliases ( extT, extQ, extM )
 import Data.Typeable         ( Typeable(..) )
 import Data.List             ( find, sortBy )
-import Data.Maybe            ( fromJust, catMaybes )
+import Data.Maybe            ( fromJust, catMaybes, isJust )
 import Data.Ord              ( comparing )
 import qualified Data.Map as M
+import GHC.Exts              ( Constraint )
 
 import Debug.Trace ( trace )
 
 import Language.Haskell.TH
+import Language.Haskell.TH.ExpandSyns ( expandSyns )
+import Language.Haskell.TH.Instances  ( )
 import Language.Haskell.TH.Syntax
-import Language.Haskell.TH.Lift ( deriveLift )
-
--- TODO: replace with an orphans package, with the code from:
--- https://github.com/mgsloan/quasi-extras/blob/5ab894f9868324698f2c9d6d8b9acfc79bf76a9c/reifyQ.hs
-import Language.Haskell.Meta ()
+import Language.Haskell.TH.Lift       ( deriveLift )
 
 -- Just like the InstanceD constructor, but not inside a large sum-type.
 data TInstance = TInstance Cxt Type [Dec]
@@ -47,7 +53,7 @@ $(deriveLift ''TInstance)
 instanceTy   :: TInstance -> Type
 instanceDecl :: TInstance -> Dec
 
-instanceTy (TInstance _ t _) = t
+instanceTy   (TInstance _ t _ ) = t
 instanceDecl (TInstance c t ds) = InstanceD c t ds
 
 data TemplateOutput = TemplateOutput Type [TInstance]
@@ -56,12 +62,33 @@ data TemplateOutput = TemplateOutput Type [TInstance]
 class Template a where
   invokeTemplate :: a -> Type -> [Dec] -> TemplateOutput
 
+
 processHead :: Type -> ([Pred], [Type])
 processHead typ = (l, tail $ tyUnApp r)
  where
   (l, r) = case typ of
     (ForallT _ ps t) -> (ps, t)
     t                -> ([], t)
+
+processInstance :: [Type] -> TInstance -> Maybe TInstance
+processInstance hides (TInstance ctx typ ds)
+  = Just $ TInstance (process_context ctx) typ ds
+ where
+  process_context = filter not_satisfied
+   where
+    --TODO: check if they're actually "satisfied"?
+    not_satisfied = isJust . something (const Nothing `extQ` just_var)
+    just_var (VarT _) = Just True
+    just_var _ = Nothing
+
+processHiding :: [Dec] -> [Type]
+processHiding = debug . concatMap helper
+ where
+  helper (InstanceD _ (AppT (ConT ni) (AppT (ConT nm) t)) _)
+    | nameBase ni == "Hide" && nameBase nm == "Instance"
+    = tyFlatten t
+  helper _ = []
+
 
 -- Yields all of the names that the declaration introduces.
 -- Note that duplication might occur from data declarations.
@@ -193,7 +220,7 @@ instantiate qdos
      where
       just_results = catMaybes results
       results = map (\x -> (x,) <$> find (instanceOverlaps x) ds) ds'
-      instanceOverlaps = tyOverlaps `on` instanceTy
+      instanceOverlaps = headOverlaps `on` instanceTy
 
       err_heads = pprint dhead ++ " and " ++ pprint dhead'
       err_instances = unlines . map (show . ppr . instanceTy . snd)
@@ -209,6 +236,9 @@ instantiate qdos
 
 -- NOTE: this operating even approximately properly depends on the names being
 -- fully qualified.
+
+
+{- Wrong due to var equivalence
 
 tyOverlaps :: Type -> Type -> Bool
 tyOverlaps l r = overlapBool $ tyOverlap l r
@@ -237,6 +267,30 @@ tyOverlap (AppT l r) (AppT l' r') = case (tyOverlap l l', tyOverlap r r') of
 tyOverlap x y
   | x == y    =    Overlapping
   | otherwise = NonOverlapping
+tyOverlap
+-}
+
+headOverlaps :: Type -> Type -> Bool
+headOverlaps = (==) `on` headCannon
+
+headCannon :: Type -> Type
+headCannon t = evalState (helper t) (vars, M.empty)
+ where
+  helper :: Type -> State ([Name], M.Map Name Name) Type
+  helper (VarT n) = do
+    ((n':ns), m) <- get
+    case M.lookup n m of
+      Just n'' -> return $ VarT n''
+      Nothing  -> do
+        put (ns, M.insert n n' m)
+        return $ VarT n'
+  helper (ForallT _ _ _) = fail "Forall not allowed in instance heads!"
+  helper t = gmapM (return `extM` helper) t
+
+  vars = [ mkName $ filter (not . isSpace) [a, b, c]
+         | c <- az, b <- az, a <- tail az ]
+   where
+    az = ' ' : ['a'..'z']
 
 {-
 This was removed because making instances of stuff like:
@@ -247,6 +301,12 @@ This was removed because making instances of stuff like:
   $ NameG DataName (mkPkgName $ tyConPackage tc) 
                    (mkModName $ tyConModule  tc)
  -}
+
+data Instance (a :: Constraint)
+
+class Inherit a where
+
+class Hide a where
 
 -- TODO list
 --
@@ -261,13 +321,12 @@ This was removed because making instances of stuff like:
 --
 -- * Handle default definitions
 --
--- * Handle inheriting methods from whereless instances.  The mechanism here
---   be built into the code that checks the provided declarations, and should
---   suppress providing definitions for those methods in the whereless
---   instances.
+-- * Only put necessary definitions in where statements
 --
--- * Consider how the generated type synonym works if superclass constraints
---   are allowed on the instances...
+-- * Handle whereless parameters in a different fashion - have the others just
+--   use the method from the other class.
+--
+-- * Do constraint strengthening by allowing signatures on functions.
 --
 -- * Catch kind errors at instance-build time (better yet infer them!)
 --   http://hackage.haskell.org/package/th-kinds
@@ -289,79 +348,156 @@ mkTemplate (top@(ClassD inp_cxt inp_name inp_tvs inp_fds inp_ds) : insts)
       dd <- template_decl
       return [data_decl, dd]
  where
-  -- TODO: re-enable once GHC 7.6 is released
-  type_decl = TySynD inp_name inp_tvs . mkTupleT
-            $ [ty | Just ty <- map predToType inp_cxt]
-           ++ [ty | (InstanceD _ ty _) <- insts]
+  -- Top-level names - things that should be de-uniqued.
+  top_names = concatMap decNames (top : insts)
 
-  -- TODO: make sure this doesn't reify to anything, etc.
   -- For prototyping purposes, this is OK.
   head_name = mkName $ nameBase inp_name ++ "_Template"
 
-  tvars = map (VarT . deUniqueName . tvName) inp_tvs
-
   data_decl = DataD [] head_name inp_tvs [NormalC head_name []] []
 
-  inst_head = AppT (ConT $ mkName "Template")
-            . foldl1 AppT
-            $ ConT head_name : tvars
+  {- TODO: re-enable once GHC 7.6 is released
+  type_decl = TySynD inp_name inp_tvs . mkTupleT
+            $ [ty | Just ty <- map predToType inp_cxt]
+           ++ [ty | (InstanceD _ ty _) <- insts]
+  -}
 
-  out_head = foldl1 AppT
-           $ ConT (mkName $ nameBase inp_name) : tvars
-  
   -- TODO: resolve kind arities by reifying the constraints and doing kind
   -- inference.  For now * is assumed unless an explicit sig is given.
   template_decl :: DecQ
   template_decl = do
-    expr <- [e| TemplateOutput
-                  $( lift $ deUniqueNames top_names out_head )
-                  $( listE $ map (lift . mk_inst) insts )
-              |]
-    esub <- ListE . (:[]) <$> lift placeholder
-    tsubs <- M.fromList <$> mapM (\(t, e) -> (, e) <$> lift t) unlifted_subs
+    -- References to local variables
+    let n_typ   = mkName "typ"
+        n_ctx   = mkName "ctx"
+        n_decls = mkName "decls"
+        n_hides = mkName "hides"
+  
+    -- Converts the TyVarBndrs to unqualified Name.
+    let tv_names = map (deUniqueName . tvName) inp_tvs
 
+        tvars = map VarT tv_names
+
+    -- The head of the instance of Template.
+        inst_head = AppT (ConT $ mkName "Template")
+                  . mkAppsT $ ConT head_name : tvars
+
+    -- The head of the generated TemplateOutput.
+        gen_head = mkAppsT $ ConT gen_name : tvars
+        gen_name = mkName $ nameBase inp_name
+
+        tv_len = litE . IntegerL . fromIntegral $ length inp_tvs
+
+    -- Expression that checks that the type supplied to the instance template
+    -- has the right number of parameters.
+    tv_extract <-
+      [e|
+      case processHead $( varE n_typ ) of
+        (x, l) | length l == $( tv_len ) -> (x, l)
+               | otherwise 
+               -> error $
+                    $( litE . StringL $ nameBase inp_name )
+                    ++ " expects " ++ show $( tv_len ) ++ " class parameter(s)" 
+      |]
+
+    -- Locals to represent the types provided to the different type parameters.
+    let n_tvs = map (mkName . ("tv_" ++) . nameBase) tv_names
+
+    -- Where-declaration for extracting the type variables into these locals.
+        tvs_dec = ValD (TupP [VarP n_ctx, ListP $ map VarP n_tvs])
+                       (NormalB tv_extract)
+                       []
+
+    -- Substitutions that rewrite the type variables to refer to these locals.
+    -- This substitution is done after lifting the declarations, so they need
+    -- to match on the lifted version of the type variables.
+    tsubs <- M.fromList <$> zipWithM (\t n -> (, VarE n) <$> lift t) tvars n_tvs
+
+    --TODO: figure out what to use for the parameter representation.
+
+    -- Builds the instance declarations.
+    (params, inst_ds) <- unzip <$> mapM mk_inst insts
+
+    -- Lifts the instance declarations to TH code that builds them
+    let gen_insts = map ( \x -> [e| processInstance $( varE n_hides ) $( lift x ) |] )
+                  $ concat inst_ds
+
+    -- An expression for the yielded TemplateOutput.
+    expr <- [e| TemplateOutput
+                  $( lift $ deUniqueNames top_names gen_head )
+                  (catMaybes $( listE gen_insts ))
+              |]
+
+    -- Lifted version of the placeholder in the where declarations of the methods.
+    decls_sub <- ListE . (:[]) <$> lift placeholder
+
+    -- Rewritten version of the expression that generates TemplateOutput.
     let expr' = everywhere (id `extT` trans) expr
-        trans x | x == esub = VarE n_decls
+
+    -- Substitute in references to the declarations passed into invokeTemplate.
+        trans x | x == decls_sub = VarE n_decls
+    -- Substitute references to the type parameters passed into invokeTemplate.
                 | Just v <- M.lookup x tsubs = v
                 | otherwise = x
 
-    tv_dec <- valD (tupP [varP n_ctx, listP $ map return tvpats]) 
-                   (normalB tv_extract)
-                   []
-    return
-      $ InstanceD [] inst_head
-      [ FunD (mkName "invokeTemplate") [Clause pats (NormalB expr') [tv_dec]] ]
+    -- Where declaration that computes the parameter to processInstance, which
+    -- provides the instance-head types that should be hidden.
+    hides_dec <- valD (varP n_hides)
+                      (normalB . appE [e| processHiding |] $ varE n_decls)
+                      []
+
+    let clause = Clause pats (NormalB expr') wheres
+        pats   = [WildP, VarP n_typ, VarP n_decls]
+        wheres = [tvs_dec, hides_dec]
+
+    return $ InstanceD [] inst_head [ FunD (mkName "invokeTemplate") [clause] ]
+
+  mk_inst (InstanceD cxt typ decs) = do
+    (everywhere (id `extT` deUniqueTVs) . deUniqueNames top_names)
+     <$> case typ of
+        (AppT (ConT ni) (AppT (ConT nm) typ'))
+          | nameBase ni == "Inherit" && nameBase nm == "Instance"
+          -> case (null cxt, null decs) of
+              (False, False) -> fail
+                "Inheriting instances cannot have constraints or declarations."
+              (False, True) -> fail
+                "Inheriting instances cannot have constraints."
+              (True, False) -> fail
+                "Inheriting instances cannot have declarations."
+              (True, True) -> do
+                let typs = tyFlatten $ everywhere (id `extT` deUniqueName) typ'
+--                typs <- tyFlatten <$> expandSyns de_uniqued
+                (concat *** id) . unzip <$> mapM typ_inherit typs
+
+        -- Standard case
+        _ -> return ([], [TInstance (inp_cxt ++ cxt) typ $ map mk_dec decs])
    where
-    pats = [WildP, VarP n_typ, VarP n_decls]
-    n_typ   = mkName "typ"
-    n_ctx   = mkName "ctx"
-    n_decls = mkName "decls"
-    tv_extract = [e|case processHead $(varE n_typ) of
-                      (x, l) | length l == $(tv_len) -> (x, l)
-                             | otherwise -> error $ $(tv_error)
-                   |]
-    tv_len = litE . IntegerL . fromIntegral $ length inp_tvs
-    tv_error = [e| $(litE . StringL $ nameBase inp_name)
-                ++ " expects " ++ show $(tv_len) ++ " class parameter(s)" |]
-    (unlifted_subs, tvpats) = unzip $ map (mk_tv . nameBase . tvName) inp_tvs
+    -- TODO: less partiality
+    typ_inherit
+      = fmap mk_inherit . firstF reify
+      . (fromJust . tyConName . head &&& tail) . tyUnApp
+    -- TODO: check if the deriving class constraints are a superset
+    mk_inherit (ClassI (ClassD _ n tvs _ ds) _, ips)
+      = (concatMap decNames ds, TInstance cxt (mkAppsT $ ConT n : ips) ds')
+     where
+      ds' = concatMap sig_dec ds
+      sig_dec (SigD n t)
+        = [mk_dec $ ValD (VarP n) (NormalB . VarE . mkName $ nameBase n) []]
+      sig_dec _ = []
+      {-
+      ds' = everywhere (id `extT` process) ds
+      process t | Just t' <- M.lookup t t_map = t'
+                | otherwise                   = t
+      t_map = M.fromList $ zip (map (VarT . tvName) tvs) ips
+      -}
+    mk_inherit (i, _) 
+      = error $ "Can only inherit from classes. Got:\n" ++ pprint i
 
-  mk_tv n = ((VarT $ mkName n, VarE tv), VarP tv)
-   where
-    tv = mkName $ "tv_" ++ n
-
-  mk_inst (InstanceD ctx typ decs)
-    = everywhere (id `extT` deUniqueTVs)
-    . deUniqueNames top_names
-    $ TInstance (inp_cxt ++ ctx) typ $ map mk_dec decs
-  mk_inst _
-    = error "Instance Templates can only contain parameters and instances."
-
-  placeholder = ValD (VarP name) (NormalB $ VarE name) []
-    where name = available "placeholder"
+  mk_inst _ = error
+    "Instance Templates can only contain parameter classes and instances."
 
   mk_dec dec = case dec of
-    (ValD _ _ _) -> build_dec proxy name renamed
-    (FunD _ _  ) -> build_dec proxy name renamed
+    (ValD (VarP n) b ds) -> build_dec proxy n (ValD (VarP proxy) b ds)
+    (FunD       n    cs) -> build_dec proxy n (FunD       proxy    cs)
 --    ()
 --    (TySynInstD )
 --    (DataInstD )
@@ -370,31 +506,21 @@ mkTemplate (top@(ClassD inp_cxt inp_name inp_tvs inp_fds inp_ds) : insts)
        $ "Cannot handle the following in an instance declaration: "
       ++ pprint dec
    where
-    proxy   = available "def"
-    name    = dec_name dec
-    renamed = rename_dec dec proxy
+    proxy = available "def"
 
   build_dec proxy name renamed
     = ValD (VarP name)
            (NormalB . LetE [renamed] $ VarE proxy)
            [placeholder]
 
-  -- TODO: do we need to handle more types of patterns??
-  dec_name (ValD (VarP n) _ _) = n
-  dec_name (FunD n _) = n
-  dec_name x = error $ "Unsupported type of declaration: " ++ show x
-
-  rename_dec (ValD _ b ds) n' = ValD (VarP n') b ds
-  rename_dec (FunD _ cs) n' = FunD n' cs
-  rename_dec x _ = error $ "Unsupported type of declaration: " ++ show x
+  placeholder = ValD (VarP name) (NormalB $ VarE name) []
+    where name = available "placeholder"
 
   --TODO: remove, as probably unnecessary
   available prefix
     = fromJust
     . find (`notElem` (allNames top ++ allNames insts))
     $ map (mkName . (prefix ++) . empty0) ([0..] :: [Int])
-
-  top_names = concatMap decNames (top : insts)
 
   empty0 0 = ""
   empty0 n = show n
@@ -403,7 +529,7 @@ mkTemplate _ = error "First declaration passed to mkTemplate must be a class."
 
 debug x = trace (show x) x
 
--- Utils for buildTemplate
+-- Utils for mkTemplate
 
 -- Note: Due to lack of TH support for constraint kinds, equality
 -- constraints aren't supported.
@@ -413,6 +539,9 @@ predToType _ = Nothing
 
 mkTupleT :: [Type] -> Type
 mkTupleT xs = foldl AppT (TupleT (length xs)) xs
+
+mkAppsT :: [Type] -> Type
+mkAppsT = foldl1 AppT
 
 tvName :: TyVarBndr -> Name
 tvName (PlainTV  n  )   = n
@@ -426,6 +555,11 @@ kindArity :: Kind -> Int
 kindArity StarK = 1
 kindArity (ArrowK _ r) = 1 + kindArity r
 
+tyFlatten :: Type -> [Type]
+tyFlatten t = case tyUnApp t of
+ (TupleT _ : xs) -> concatMap tyFlatten xs
+ _               -> [t]
+
 tyUnApp :: Type -> [Type]
 tyUnApp = reverse . helper
  where
@@ -438,3 +572,6 @@ tyConName _ = Nothing
 
 allNames :: Data d => d -> [Name]
 allNames = listify (const True :: Name -> Bool)
+
+firstF :: Functor f => (a -> f b) -> (a, c) -> f (b, c)
+firstF f (x, y) = (,y) <$> f x

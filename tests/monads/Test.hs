@@ -1,6 +1,8 @@
 {-# LANGUAGE TemplateHaskell, QuasiQuotes, DeriveDataTypeable, RankNTypes, ConstraintKinds #-}
 module Test where
 
+-- TODO: use "Scrap your typeclasses" examples
+
 import Classes ((<$>), (<*>))
 import qualified Classes as D
 import Prelude (Eq, Read, Show, (+), (-))
@@ -14,6 +16,7 @@ newtype ZipList a = ZipList [a]
 data Maybe a = Just a | Nothing
   deriving (Eq, Read, Show)
 
+
 $(instantiate
  [template Monad_Template [t| Monad Maybe |] [d|
 -- instance Monad  where
@@ -26,7 +29,8 @@ $(instantiate
     return x      =  Just x
 
     fail _        =  Nothing
- |] ])
+  |]
+ ])
 
 testMaybe = (-) <$> Just 49 <*> Just 7
 

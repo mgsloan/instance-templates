@@ -23,6 +23,8 @@ class Applicative m => Monad m where
   (>>=) :: m a -> (a -> m b) -> m b
   x >>= f = join $ map f x
 
+  (>>) :: m a -> m b -> m b
+
   join :: m (m a) -> m a
   join x = x >>= id
  

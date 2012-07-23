@@ -3,8 +3,8 @@
 module Templates where
 
 import qualified Classes as D
-import Language.Haskell.InstanceTemplates
 
+import Language.Haskell.InstanceTemplates
 import Language.Haskell.TH.Syntax -- This is just for prettier -ddump-splices
 
 -- The instance templates are defined in a separate module because they use new
@@ -20,6 +20,16 @@ $(mkTemplate =<< [d|
   instance D.Functor f where
     map = fmap
  |] )
+
+{- Instance templates syntax
+
+deriving class Functor f where
+  fmap :: a -> f a
+  instance D.Functor f where
+    map = fmap
+
+-}
+
 
 type Applicative f = (D.Functor f, D.Applicative f)
 
@@ -68,6 +78,7 @@ $(mkTemplate =<< [d|
 
   instance D.Monad m where
     (>>=) = (>>=)
+    (>>)  = (>>)
 
   instance D.MonadFail m where
     fail = fail

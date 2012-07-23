@@ -25,7 +25,9 @@ Library
                      containers,
                      directory,
                      filepath,
-                     haskell-src-meta == 0.5.*,
+                     mtl,
                      syb,
-                     template-haskell == 2.7.0.0,
-                     th-lift == 0.5.*
+                     template-haskell == 2.7.*,
+                     th-expand-syns == 0.3.*,
+                     th-lift == 0.5.*,
+                     th-orphans == 0.5.*
