@@ -1,4 +1,4 @@
-{-# LANGUAGE TemplateHaskell, QuasiQuotes, ConstraintKinds, ScopedTypeVariables, FlexibleInstances, FlexibleContexts,
+{-# LANGUAGE TemplateHaskell, ConstraintKinds, ScopedTypeVariables, FlexibleInstances, FlexibleContexts,
     UndecidableInstances #-} -- Not actually using this, just necessary for an AST quote
 
 -- From Max Bolingbroke's lattices library

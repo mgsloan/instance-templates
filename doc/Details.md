@@ -132,6 +132,9 @@ of the instances other than `D.Functor`, but this could be confusing.
 Interaction with -XDefaultSignatures
 ====================================
 
+
+
+
 Interaction with -XGenericDeriving
 ==================================
 
@@ -161,6 +164,26 @@ There are a couple ways we could solve this:
 Interaction with -XGeneralizedNewtypeDeriving
 =============================================
 
+
+Implied Extensions
+==================
+
+Instance Templates rely on ConstraintKinds for being able to generate synonyms
+for constraints.  Therefore, it makes sense to have the extension imply
+`-XConstraintKinds`.  It might also makes sense to imply `-XScopedTypeVariables`
+because type variables are scoped to multiple levels (though, they are levels
+of declaration, rather than making it into sub-expressions / clauses).
+
+One question is whether `-XMultiParamTypeClasses` should be necessary to invoke
+a multi-parameter instance template, even if multi-parameter instances are not
+generated.  I think that it should be required, because in the .
+
+A trickier question is whether the extensions that have to do with instances
+should need to be enabled when they are utilized by `-XInstanceTemplates`..
+This would be a very annoying cohesion between the usage and definition of the
+templates.  Certainly extensions that have to do with the interactions between
+instances should be required, when necessary (-XOverlappingInstances, 
+-XUndecidableInstances, -XIncoherentInstances).
 
 
 Syntax Ideas / Alternatives

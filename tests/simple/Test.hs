@@ -1,12 +1,22 @@
-{-# LANGUAGE TemplateHaskell, QuasiQuotes, RankNTypes, ConstraintKinds, FlexibleInstances #-}
+{-# LANGUAGE
+    TemplateHaskell
+  , RankNTypes
+  , ConstraintKinds
+  , FlexibleInstances
+  #-}
+
+-- | This example illustrates the simplest variety of implementing one
+--   interface in terms of another - renaming a method.
 module Test where
 
-import Classes (Foo, Foo_Template(..))
+import Classes
 import Language.Haskell.InstanceTemplates
 
 $(instantiate
- [template Foo_Template [t| forall b. Foo Int |]
+ [template Foo_T [t| Foo Int |]
    [d|
-     foo = 5
+     getFoo = 5
    |]
  ])
+
+main = print (getBar :: Int)

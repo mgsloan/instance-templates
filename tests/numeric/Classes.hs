@@ -1,6 +1,16 @@
-{-# LANGUAGE TemplateHaskell, QuasiQuotes, ConstraintKinds, ScopedTypeVariables, FlexibleInstances #-}
+{-# LANGUAGE
+    TemplateHaskell
+  , ConstraintKinds
+  , ScopedTypeVariables
+  , FlexibleInstances
+  , MultiParamTypeClasses
+  , RebindableSyntax
+  #-}
+
+-- |
 module Classes where
 
+import Prelude ( ($), (.), (>>), (>=) )
 import qualified Prelude as P
 
 import Language.Haskell.InstanceTemplates
@@ -15,11 +25,20 @@ class Absable         a where abs         :: a -> a
 class Signumable      a where signum      :: a -> a
 class FromIntegerable a where fromInteger :: P.Integer -> a
 
+-- Necessary due to RebindableSyntax.
+instance FromIntegerable P.Int where fromInteger = P.fromInteger
+
+
 type Num a = (Addable a, Multiplicable a, Subtractable a, Negateable a,
               Absable a, Signumable a, FromIntegerable a)
 
+-- This instance template provides the same interface as the original Num class
+-- (except for defaults, which should be supported)
 $(mkTemplate P.=<< [d|
   class Num a where
+
+  -- This means that the methods of these classes are used as parameters, and
+  -- are provided to the generated instances.
   instance Inherit (Instance
     ( Addable a, Multiplicable a, Subtractable a, Negateable a
     , Absable a, Signumable a, FromIntegerable a )) where
@@ -28,14 +47,6 @@ $(mkTemplate P.=<< [d|
 -- (but this ought to work instead)
 --  instance Inherit (Methods (Num a))
  |])
-
-{- Instance Templates syntax
-
-deriving class Num a where
-  instance ( Addable a, Multiplicable a, Subtractable a, Negateable a
-           , Absable a, Signumable a, FromIntegerable a )
-
--}
 
 
 type OldNum a = Num a
@@ -51,4 +62,36 @@ $(mkTemplate P.=<< [d|
   instance Absable         a where abs         = P.abs
   instance Signumable      a where signum      = P.signum
   instance FromIntegerable a where fromInteger = P.fromInteger
+ |])
+
+
+-- This provides the boilerplate derivation of these numeric instances,
+-- if you have a bijection from your type to a type that supports Num.
+-- This will be more concise once instance templates can invoke other
+-- templates.
+
+data Bij a b = Bij
+  { fwd :: (a -> b)
+  , bwd :: (b -> a)
+  }
+
+binBij :: Bij a b -> (a -> a -> a) -> (b -> b -> b)
+binBij b f x y = fwd b $ f (bwd b x) (bwd b y)
+
+inBij  :: Bij a b ->      (a -> a) ->      (b -> b)
+inBij b f = fwd b . f . bwd b
+
+type BijNum a b = Num b
+
+$(mkTemplate P.=<< [d|
+  class P.Num a => BijNum a b where
+    bij :: Bij a b
+
+  instance Addable         b where (+)         = binBij bij (P.+)
+  instance Multiplicable   b where (*)         = binBij bij (P.*)
+  instance Subtractable    b where (-)         = binBij bij (P.-)
+  instance Negateable      b where negate      =  inBij bij P.negate
+  instance Absable         b where abs         =  inBij bij P.abs
+  instance Signumable      b where signum      =  inBij bij P.signum
+  instance FromIntegerable b where fromInteger = fwd bij . P.fromInteger
  |])

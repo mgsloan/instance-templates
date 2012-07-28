@@ -4,27 +4,29 @@ Instance Templates
 Hardly any discussion of type class hierarchy goes without the common gripe
 that Applicative ought to be the superclass of Monad.  However, restructuring
 this hierarchy would break a great deal of code, particularly if we removed
-redundant methods such as "pure".
+redundant methods such as "pure".  This recently happened when merely removing
+the Eq/Show constraints from Num.
 
 This Haskell extension proposal provides a simple solution for refactoring
-type-class hierarchies while maintaining backwards compatibility.  However, it
+type-class hierarchies while maintaining backwards compatibility.  But it
 can also do more than this, allowing boilerplate declarations to be generated
 in terms of some common pattern of usage.  Functions in Haskell enjoy the
-reasoning and abstraction benefits of referential transparency.  This
-extension gives us this same power, but for instance declarations, allowing
-for the abstraction of common instantiation patterns.
+reasoning and abstraction benefits of referential transparency, and this
+extension gives us this same power, but for instance declarations.  This allows
+us to freely abstract common instantiation patterns.
 
-This repository contains some other documentation about this extension, as well
-as a work-in-progress TH prototype of the feature.  The file "Rewriter.hs" uses
-the haskell-src-exts package to rewrite Haskell code to allow regular classes
-and instances to use this framework.
+This repository contains some other documentation about this extension, as
+well as a work-in-progress TH prototype of the feature.  Other than the issues
+with TH and ConstraintKinds, the prototype does nearly everything that the
+actual feature would need to, sans a few fairly straightforward conveniences.
+Since this was possible in less than 400 lines of code (sans comments), I'm
+guessing / hoping that the that the changes to GHC would be correspondingly 
+conservative.
 
 This proposal shares some goals with [Default Superclass Instances](
 http://hackage.haskell.org/trac/ghc/wiki/DefaultSuperclassInstances),
 but achieves these goals in a fashion that's easier to understand and 
-implement, of course making a different set of trade-offs.  We sacrifice
-the ability to restructure hierarchies without touching the actual code,
-in exchange for being capable of much more.
+implement, while providing more power.
 
 
 Description
@@ -173,11 +175,11 @@ Why?
   typeclass instances which "always" can be implemented universally in terms
   of some other.
 
-* In order to create configurable instances (see the "weak typing" section)
-  with superclass instances, we need to create a new typeclass.  This is odd,
-  because it doesn't make much sense to use it in any other context than
-  the superclass of the instance.  I think it's preferable to be able to "hide"
-  this class so that it can't be depended on.
+  In order to create configurable instances with superclass instances, we need
+  to create a new typeclass.  This is odd, because it doesn't make much sense
+  to use it in any other context than the superclass of the instance.  I think
+  it's preferable to be able to "hide" this class so that it can't be depended
+  upon.
 
 * Avoidance of Template Haskell.
 
@@ -185,7 +187,7 @@ Why?
     it's making it convenient to write code that was already quite possible to
     write before.  However, the error messages and potential for analysis by
     tools are impaired.  By making it a language feature, we can conquer a good
-    deal of the macro-expansion design space for typeclasses.
+    deal of the macro-expansion design space for Type-Classes.
 
 
   - People have observed many things that are wrong with TH / mis-aligned with
@@ -203,7 +205,8 @@ Why not Superclass Default Instances?
 =====================================
 
 The #1 difference between this proposal and superclass default instances is
-that instance templates are not typeclasses.  The weaknesses of the Default Superclass Instances can be exposed in the
+that instance templates are not typeclasses.  The weaknesses of the Default
+Superclass Instances can be exposed in the
 <a href="http://hackage.haskell.org/trac/ghc/wiki/DefaultSuperclassInstances#Instancedeclarations">
 instance declarations</a> section.  There, it says:
 
@@ -288,6 +291,35 @@ deriving class JoinSemiLattice where
 ```
 
 This is quite similar in feel to the `-XDefaultSignatures` extension.
+
+
+```haskell
+class PartialOrder a => JoinSemiLatticeClass a where
+  join :: a -> a -> a
+
+type JoinSemiLattice a = (JoinSemiLatticeClass a, PartialOrder a)
+
+template JoinSemiLattice a where
+  join :: a -> a -> a
+
+  instance JoinSemiLatticeClass a where
+    join = join
+
+  instance Eq a => PartialOrder a where
+    cmp x y
+      | j == x = Just GT
+      | j == y = Just LT
+      | x == y = Just EQ
+      | _ = Nothing
+     where
+      j = join x y
+```
+
+```haskell
+instance JoinSemiLattice Bool where
+  join = and
+
+
 
 
 "Problems"

@@ -1,4 +1,4 @@
-{-# LANGUAGE TemplateHaskell, QuasiQuotes, ConstraintKinds, ScopedTypeVariables, FlexibleInstances, FlexibleContexts #-}
+{-# LANGUAGE TemplateHaskell, ConstraintKinds, ScopedTypeVariables, FlexibleInstances, FlexibleContexts #-}
 
 -- From Max Bolingbroke's lattices library
 module Enumerable where

@@ -39,7 +39,6 @@ import GHC.Exts              ( Constraint )
 import Debug.Trace ( trace )
 
 import Language.Haskell.TH
-import Language.Haskell.TH.ExpandSyns ( expandSyns )
 import Language.Haskell.TH.Instances  ( )
 import Language.Haskell.TH.Syntax
 import Language.Haskell.TH.Lift       ( deriveLift )
@@ -89,6 +88,8 @@ processHiding = debug . concatMap helper
     = tyFlatten t
   helper _ = []
 
+debug :: Show a => a -> a
+debug x = trace (show x) x
 
 -- Yields all of the names that the declaration introduces.
 -- Note that duplication might occur from data declarations.
@@ -106,7 +107,7 @@ decNames (NewtypeInstD _ _ _ c _      ) = conNames c
 decNames (ValD         p _ _          ) = patNames p
 decNames (SigD         n _            ) = [n]
 decNames (ForeignD (ImportF _ _ _ n _)) = [n]
--- Handles InstanceD, SigD, ForeignD (ExportF ...), PragmaD, TySynInstD
+-- Handles ForeignD (ExportF ...), PragmaD, TySynInstD
 decNames _                              = []
 
 conNames :: Con -> [Name]
@@ -127,21 +128,9 @@ patNames (TildeP      p     ) = patNames p
 patNames (AsP         n p   ) = n : patNames p
 patNames (RecP        _ f   ) = concatMap (patNames . snd) f
 patNames (ListP       p     ) = concatMap patNames p
-patNames (SigP        p t   ) = patNames p
-patNames (ViewP       e p   ) = patNames p
+patNames (SigP        p _   ) = patNames p
+patNames (ViewP       _ p   ) = patNames p
 patNames _                    = []
-
-{- TODO: remove
-infoName :: Info -> Name
-infoName (ClassI     d _    ) = head $ decNames d
-infoName (ClassOpI   n _ _ _) = n
-infoName (TyConI     d      ) = head $ decNames d
-infoName (FamilyI    d _    ) = head $ decNames d
-infoName (PrimTyConI n _ _  ) = n
-infoName (DataConI   n _ _ _) = n
-infoName (VarI       n _ _ _) = n
-infoName (TyVarI     n _    ) = n
--}
 
 -- Convenience function for use with TH AST quoters
 
@@ -285,7 +274,7 @@ headCannon t = evalState (helper t) (vars, M.empty)
         put (ns, M.insert n n' m)
         return $ VarT n'
   helper (ForallT _ _ _) = fail "Forall not allowed in instance heads!"
-  helper t = gmapM (return `extM` helper) t
+  helper ty = gmapM (return `extM` helper) ty
 
   vars = [ mkName $ filter (not . isSpace) [a, b, c]
          | c <- az, b <- az, a <- tail az ]
@@ -352,7 +341,7 @@ mkTemplate (top@(ClassD inp_cxt inp_name inp_tvs inp_fds inp_ds) : insts)
   top_names = concatMap decNames (top : insts)
 
   -- For prototyping purposes, this is OK.
-  head_name = mkName $ nameBase inp_name ++ "_Template"
+  head_name = mkName $ nameBase inp_name ++ "_T"
 
   data_decl = DataD [] head_name inp_tvs [NormalC head_name []] []
 
@@ -396,7 +385,8 @@ mkTemplate (top@(ClassD inp_cxt inp_name inp_tvs inp_fds inp_ds) : insts)
                | otherwise 
                -> error $
                     $( litE . StringL $ nameBase inp_name )
-                    ++ " expects " ++ show $( tv_len ) ++ " class parameter(s)" 
+                    ++ " expects " ++ show ($( tv_len ) :: Int)
+                    ++ " class parameter(s)"
       |]
 
     -- Locals to represent the types provided to the different type parameters.
@@ -445,18 +435,18 @@ mkTemplate (top@(ClassD inp_cxt inp_name inp_tvs inp_fds inp_ds) : insts)
                       (normalB . appE [e| processHiding |] $ varE n_decls)
                       []
 
-    let clause = Clause pats (NormalB expr') wheres
+    let clauz  = Clause pats (NormalB expr') wheres
         pats   = [WildP, VarP n_typ, VarP n_decls]
         wheres = [tvs_dec, hides_dec]
 
-    return $ InstanceD [] inst_head [ FunD (mkName "invokeTemplate") [clause] ]
+    return $ InstanceD [] inst_head [ FunD (mkName "invokeTemplate") [clauz] ]
 
-  mk_inst (InstanceD cxt typ decs) = do
+  mk_inst (InstanceD ctx typ decs) = do
     (everywhere (id `extT` deUniqueTVs) . deUniqueNames top_names)
      <$> case typ of
         (AppT (ConT ni) (AppT (ConT nm) typ'))
           | nameBase ni == "Inherit" && nameBase nm == "Instance"
-          -> case (null cxt, null decs) of
+          -> case (null ctx, null decs) of
               (False, False) -> fail
                 "Inheriting instances cannot have constraints or declarations."
               (False, True) -> fail
@@ -465,23 +455,24 @@ mkTemplate (top@(ClassD inp_cxt inp_name inp_tvs inp_fds inp_ds) : insts)
                 "Inheriting instances cannot have declarations."
               (True, True) -> do
                 let typs = tyFlatten $ everywhere (id `extT` deUniqueName) typ'
+-- import Language.Haskell.TH.ExpandSyns ( expandSyns )
 --                typs <- tyFlatten <$> expandSyns de_uniqued
                 (concat *** id) . unzip <$> mapM typ_inherit typs
 
         -- Standard case
-        _ -> return ([], [TInstance (inp_cxt ++ cxt) typ $ map mk_dec decs])
+        _ -> return ([], [TInstance (inp_cxt ++ ctx) typ $ map mk_dec decs])
    where
     -- TODO: less partiality
     typ_inherit
       = fmap mk_inherit . firstF reify
       . (fromJust . tyConName . head &&& tail) . tyUnApp
     -- TODO: check if the deriving class constraints are a superset
-    mk_inherit (ClassI (ClassD _ n tvs _ ds) _, ips)
-      = (concatMap decNames ds, TInstance cxt (mkAppsT $ ConT n : ips) ds')
+    mk_inherit (ClassI (ClassD _ n _ _ ds) _, ips)
+      = (concatMap decNames ds, TInstance ctx (mkAppsT $ ConT n : ips) ds')
      where
       ds' = concatMap sig_dec ds
-      sig_dec (SigD n t)
-        = [mk_dec $ ValD (VarP n) (NormalB . VarE . mkName $ nameBase n) []]
+      sig_dec (SigD fn _)
+        = [mk_dec $ ValD (VarP fn) (NormalB . VarE . mkName $ nameBase fn) []]
       sig_dec _ = []
       {-
       ds' = everywhere (id `extT` process) ds
@@ -527,7 +518,6 @@ mkTemplate (top@(ClassD inp_cxt inp_name inp_tvs inp_fds inp_ds) : insts)
 
 mkTemplate _ = error "First declaration passed to mkTemplate must be a class."
 
-debug x = trace (show x) x
 
 -- Utils for mkTemplate
 
