@@ -1,3 +1,5 @@
+Update Nov 5, 2014: This proposal has been superseded by https://ghc.haskell.org/trac/ghc/wiki/InstanceTemplates , a very similar proposal with nicer syntax and more thorough description, by Richard Eisenberg (goldfire).
+
 Instance Templates
 ==================
 
